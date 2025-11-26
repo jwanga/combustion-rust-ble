@@ -1,0 +1,75 @@
+[package]
+name = "combustion-rust-ble"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+authors = ["James Wanga"]
+description = "Cross-platform Bluetooth Low Energy library for Combustion Inc Predictive Thermometer probes"
+documentation = "https://docs.rs/combustion-rust-ble"
+repository = "https://github.com/combustion-inc/combustion-rust-ble"
+readme = "README.md"
+license = "Unlicense"
+keywords = ["bluetooth", "ble", "thermometer", "cooking", "combustion"]
+categories = ["hardware-support", "api-bindings"]
+exclude = [
+    ".github/",
+    "tests/",
+]
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[dependencies]
+btleplug = "0.11"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+thiserror = "1"
+tracing = "0.1"
+futures = "0.3"
+async-trait = "0.1"
+parking_lot = "0.12"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"], optional = true }
+bytes = "1"
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = "0.11"
+pretty_assertions = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+proptest = "1"
+ratatui = "0.28"
+crossterm = "0.28"
+
+[features]
+default = []
+serde = ["dep:serde", "uuid/serde", "chrono/serde"]
+
+[[example]]
+name = "discover_probes"
+path = "examples/discover_probes.rs"
+
+[[example]]
+name = "temperature_monitor"
+path = "examples/temperature_monitor.rs"
+
+[[example]]
+name = "log_download"
+path = "examples/log_download.rs"
+
+[[example]]
+name = "prediction_cooking"
+path = "examples/prediction_cooking.rs"
+
+[[example]]
+name = "multi_probe"
+path = "examples/multi_probe.rs"
+
+[[example]]
+name = "food_safety"
+path = "examples/food_safety.rs"
+
+[[example]]
+name = "probe_dashboard"
+path = "examples/probe_dashboard.rs"
+
