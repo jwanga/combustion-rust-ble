@@ -320,9 +320,29 @@ pub fn build_cancel_prediction_request() -> UartMessage {
     build_set_prediction_request(0, 0)
 }
 
-/// Build a Configure Food Safe request.
-pub fn build_configure_food_safe_request(product_type: u8) -> UartMessage {
-    UartMessage::new(UartMessageType::ConfigureFoodSafe, vec![product_type])
+/// Build a Configure Food Safe request with full 10-byte payload.
+///
+/// The payload is a packed 10-byte structure containing all food safe parameters.
+/// See `FoodSafeConfig::to_bytes()` for the format.
+pub fn build_configure_food_safe_request(config_bytes: &[u8; 10]) -> UartMessage {
+    UartMessage::new(UartMessageType::ConfigureFoodSafe, config_bytes.to_vec())
+}
+
+/// Build a Configure Food Safe request for simplified mode.
+///
+/// This is a convenience function for simplified mode where only the product type matters.
+/// For integrated mode or custom parameters, use `build_configure_food_safe_request` with
+/// `FoodSafeConfig::to_bytes()`.
+pub fn build_configure_food_safe_simplified_request(product_type: u8) -> UartMessage {
+    // For simplified mode, build a minimal config
+    // Mode = 0 (Simplified), Product = product_type, Serving = 0 (Immediate)
+    // Rest of the fields are zeroed as they're ignored in simplified mode
+    let mut payload = [0u8; 10];
+    // Byte 0: Mode (bits 0-2) = 0, Product low bits (bits 3-7)
+    payload[0] = (product_type as u8 & 0x1F) << 3;
+    // Byte 1: Product high bits (bits 0-4), Serving (bits 5-7) = 0
+    payload[1] = (product_type >> 5) as u8 & 0x1F;
+    UartMessage::new(UartMessageType::ConfigureFoodSafe, payload.to_vec())
 }
 
 /// Build a Reset Food Safe request.

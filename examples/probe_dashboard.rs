@@ -29,9 +29,10 @@
 //! | `Q/Esc` | Quit |
 
 use combustion_rust_ble::{
-    celsius_to_fahrenheit, BatteryStatus, ConnectionState, DeviceManager, FoodSafeProduct,
-    FoodSafeServingState, PredictionMode, PredictionState, PredictionType, Probe, ProbeColor,
-    ProbeMode, Result,
+    celsius_to_fahrenheit, BatteryStatus, ConnectionState, DeviceManager, FoodSafeConfig,
+    FoodSafeMode, FoodSafeServingState, FoodSafeState, IntegratedProduct, PredictionMode,
+    PredictionState, PredictionType, Probe, ProbeColor, ProbeMode, Result, Serving,
+    SimplifiedProduct,
 };
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
@@ -121,6 +122,19 @@ enum DialogType {
     Help,
 }
 
+/// Food Safe dialog sub-state
+#[derive(Clone, Default)]
+struct FoodSafeDialogState {
+    /// 0 = Simplified, 1 = Integrated
+    selected_mode: usize,
+    /// Selected product index (depends on mode)
+    selected_product: usize,
+    /// 0 = Served Immediately, 1 = Cooked and Chilled
+    selected_serving: usize,
+    /// Current input stage: 0 = mode, 1 = product, 2 = serving
+    stage: usize,
+}
+
 /// Dialog state for input
 struct DialogState {
     dialog_type: DialogType,
@@ -130,6 +144,8 @@ struct DialogState {
     input_stage: usize,
     /// Selected prediction mode (0 = TimeToRemoval, 1 = RemovalAndResting)
     selected_mode: usize,
+    /// Food safe dialog state
+    food_safe: FoodSafeDialogState,
 }
 
 /// Main application state
@@ -295,6 +311,7 @@ impl App {
             selected_option: 0,
             input_stage: 0,
             selected_mode: 0,
+            food_safe: FoodSafeDialogState::default(),
         });
     }
 
@@ -324,21 +341,52 @@ impl App {
                     }
                 }
                 DialogType::SetFoodSafe => {
-                    let products = [
-                        FoodSafeProduct::ChickenBreast,
-                        FoodSafeProduct::GroundBeef,
-                        FoodSafeProduct::BeefSteak,
-                        FoodSafeProduct::PorkChop,
-                        FoodSafeProduct::Salmon,
-                    ];
-                    if let Some(product) = products.get(dialog.selected_option) {
-                        if let Some(probe) = self.selected_probe().cloned() {
-                            probe.configure_food_safe(*product).await?;
-                            self.log(
-                                LogLevel::Info,
-                                format!("Configured food safety: {:?}", product),
-                            );
+                    let fs = &dialog.food_safe;
+                    let serving = match fs.selected_serving {
+                        0 => Serving::ServedImmediately,
+                        _ => Serving::CookedAndChilled,
+                    };
+
+                    let config = if fs.selected_mode == 0 {
+                        // Simplified mode
+                        let simplified_products = get_simplified_products();
+                        if let Some((product, _)) = simplified_products.get(fs.selected_product) {
+                            FoodSafeConfig::simplified(*product, serving)
+                        } else {
+                            self.log(LogLevel::Error, "Invalid product selection");
+                            return Ok(());
                         }
+                    } else {
+                        // Integrated mode
+                        let integrated_products = get_integrated_products();
+                        if let Some((product, _)) = integrated_products.get(fs.selected_product) {
+                            FoodSafeConfig::integrated(*product, serving)
+                        } else {
+                            self.log(LogLevel::Error, "Invalid product selection");
+                            return Ok(());
+                        }
+                    };
+
+                    if let Some(probe) = self.selected_probe().cloned() {
+                        probe.configure_food_safe_with_config(config.clone()).await?;
+                        let mode_str = if fs.selected_mode == 0 {
+                            "Simplified"
+                        } else {
+                            "Integrated"
+                        };
+                        let serving_str = match serving {
+                            Serving::ServedImmediately => "Served Immediately",
+                            Serving::CookedAndChilled => "Cooked and Chilled",
+                        };
+                        self.log(
+                            LogLevel::Info,
+                            format!(
+                                "Configured food safety: {} mode, product #{}, {}",
+                                mode_str,
+                                fs.selected_product,
+                                serving_str
+                            ),
+                        );
                     }
                 }
                 DialogType::SetProbeId => {
@@ -438,6 +486,115 @@ fn restore_terminal(terminal: &mut Terminal) -> io::Result<()> {
         DisableMouseCapture
     )?;
     terminal.show_cursor()
+}
+
+/// Get list of simplified mode products with display names
+fn get_simplified_products() -> Vec<(SimplifiedProduct, &'static str)> {
+    vec![
+        (SimplifiedProduct::AnyPoultry, "Any Poultry (165°F/74°C)"),
+        (SimplifiedProduct::BeefCuts, "Beef Cuts (145°F/63°C)"),
+        (SimplifiedProduct::PorkCuts, "Pork Cuts (145°F/63°C)"),
+        (SimplifiedProduct::VealCuts, "Veal Cuts (145°F/63°C)"),
+        (SimplifiedProduct::LambCuts, "Lamb Cuts (145°F/63°C)"),
+        (SimplifiedProduct::GroundMeats, "Ground Meats (160°F/71°C)"),
+        (
+            SimplifiedProduct::HamFreshOrSmoked,
+            "Ham Fresh/Smoked (145°F/63°C)",
+        ),
+        (
+            SimplifiedProduct::HamCookedAndReheated,
+            "Ham Reheated (165°F/74°C)",
+        ),
+        (SimplifiedProduct::Eggs, "Eggs (160°F/71°C)"),
+        (
+            SimplifiedProduct::FishAndShellfish,
+            "Fish & Shellfish (145°F/63°C)",
+        ),
+        (SimplifiedProduct::Leftovers, "Leftovers (165°F/74°C)"),
+        (SimplifiedProduct::Casseroles, "Casseroles (165°F/74°C)"),
+    ]
+}
+
+/// Get list of integrated mode products with display names
+fn get_integrated_products() -> Vec<(IntegratedProduct, &'static str)> {
+    vec![
+        (IntegratedProduct::Poultry, "Poultry (7.0 log reduction)"),
+        (IntegratedProduct::Meats, "Meats - whole muscle (5.0 log)"),
+        (
+            IntegratedProduct::MeatsGroundChoppedOrStuffed,
+            "Meats - ground/stuffed (6.5 log)",
+        ),
+        (
+            IntegratedProduct::PoultryGroundChoppedOrStuffed,
+            "Poultry - ground/stuffed (7.0 log)",
+        ),
+        (IntegratedProduct::Seafood, "Seafood - whole (6.0 log)"),
+        (
+            IntegratedProduct::SeafoodGroundOrChopped,
+            "Seafood - ground (6.0 log)",
+        ),
+        (IntegratedProduct::SeafoodStuffed, "Seafood - stuffed (6.0 log)"),
+        (IntegratedProduct::Eggs, "Eggs (5.0 log)"),
+        (IntegratedProduct::EggsYolk, "Egg Yolk (5.0 log)"),
+        (IntegratedProduct::EggsWhite, "Egg White (5.0 log)"),
+        (IntegratedProduct::DairyMilk, "Dairy - Milk (5.0 log)"),
+        (IntegratedProduct::DairyCreams, "Dairy - Creams (5.0 log)"),
+        (
+            IntegratedProduct::DairyIceCreamMixEggnog,
+            "Dairy - Ice Cream/Eggnog (5.0 log)",
+        ),
+        (IntegratedProduct::Other, "Other (6.5 log)"),
+    ]
+}
+
+/// Get product display name from product code and mode
+fn get_product_name(product_code: u16, mode: FoodSafeMode) -> String {
+    match mode {
+        FoodSafeMode::Simplified => {
+            if let Some(product) = SimplifiedProduct::from_raw(product_code) {
+                match product {
+                    SimplifiedProduct::Default => "Default".to_string(),
+                    SimplifiedProduct::AnyPoultry => "Any Poultry".to_string(),
+                    SimplifiedProduct::BeefCuts => "Beef Cuts".to_string(),
+                    SimplifiedProduct::PorkCuts => "Pork Cuts".to_string(),
+                    SimplifiedProduct::VealCuts => "Veal Cuts".to_string(),
+                    SimplifiedProduct::LambCuts => "Lamb Cuts".to_string(),
+                    SimplifiedProduct::GroundMeats => "Ground Meats".to_string(),
+                    SimplifiedProduct::HamFreshOrSmoked => "Ham Fresh/Smoked".to_string(),
+                    SimplifiedProduct::HamCookedAndReheated => "Ham Reheated".to_string(),
+                    SimplifiedProduct::Eggs => "Eggs".to_string(),
+                    SimplifiedProduct::FishAndShellfish => "Fish & Shellfish".to_string(),
+                    SimplifiedProduct::Leftovers => "Leftovers".to_string(),
+                    SimplifiedProduct::Casseroles => "Casseroles".to_string(),
+                }
+            } else {
+                format!("Unknown ({})", product_code)
+            }
+        }
+        FoodSafeMode::Integrated => {
+            if let Some(product) = IntegratedProduct::from_raw(product_code) {
+                match product {
+                    IntegratedProduct::Poultry => "Poultry".to_string(),
+                    IntegratedProduct::Meats => "Meats".to_string(),
+                    IntegratedProduct::MeatsGroundChoppedOrStuffed => "Ground Meats".to_string(),
+                    IntegratedProduct::PoultryGroundChoppedOrStuffed => "Ground Poultry".to_string(),
+                    IntegratedProduct::Seafood => "Seafood".to_string(),
+                    IntegratedProduct::SeafoodGroundOrChopped => "Ground Seafood".to_string(),
+                    IntegratedProduct::SeafoodStuffed => "Stuffed Seafood".to_string(),
+                    IntegratedProduct::Eggs => "Eggs".to_string(),
+                    IntegratedProduct::EggsYolk => "Egg Yolk".to_string(),
+                    IntegratedProduct::EggsWhite => "Egg White".to_string(),
+                    IntegratedProduct::DairyMilk => "Dairy - Milk".to_string(),
+                    IntegratedProduct::DairyCreams => "Dairy - Creams".to_string(),
+                    IntegratedProduct::DairyIceCreamMixEggnog => "Ice Cream/Eggnog".to_string(),
+                    IntegratedProduct::Other => "Other".to_string(),
+                    IntegratedProduct::Custom => "Custom".to_string(),
+                }
+            } else {
+                format!("Unknown ({})", product_code)
+            }
+        }
+    }
 }
 
 fn render_ui(frame: &mut Frame, app: &App) {
@@ -1016,7 +1173,7 @@ fn render_prediction(frame: &mut Frame, area: Rect, app: &App) {
 fn render_food_safety_and_logs(frame: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(area);
 
     // Food safety
@@ -1024,41 +1181,122 @@ fn render_food_safety_and_logs(frame: &mut Frame, area: Rect, app: &App) {
 
     if let Some(probe) = app.selected_probe() {
         if let Some(data) = probe.food_safe_data() {
-            let status_style = match data.serving_state {
-                FoodSafeServingState::SafeToServe => Style::default().fg(Color::Green),
-                FoodSafeServingState::NotSafe => Style::default().fg(Color::Red),
-            };
-
-            let status_icon = match data.serving_state {
-                FoodSafeServingState::SafeToServe => "✓ SAFE",
-                FoodSafeServingState::NotSafe => "⚠ NOT SAFE",
+            // State with icon
+            let state = data.state();
+            let (state_icon, state_style) = match state {
+                FoodSafeState::NotSafe => ("⏳", Style::default().fg(Color::Yellow)),
+                FoodSafeState::Safe => ("✓", Style::default().fg(Color::Green)),
+                FoodSafeState::SafetyImpossible => ("✗", Style::default().fg(Color::Red)),
             };
 
             food_lines.push(Line::from(vec![
-                Span::raw("Status: "),
-                Span::styled(status_icon, status_style),
+                Span::raw("State: "),
+                Span::styled(format!("{} {:?}", state_icon, state), state_style),
             ]));
 
-            food_lines.push(Line::from(format!(
-                "Log Reduction: {:.2} / {:.1}",
-                data.log_reduction,
-                data.progress_percent()
-            )));
+            // Mode and config info
+            if let Some(ref config) = data.config {
+                let mode_str = match config.mode {
+                    FoodSafeMode::Simplified => "Simplified",
+                    FoodSafeMode::Integrated => "Integrated",
+                };
+                food_lines.push(Line::from(vec![
+                    Span::raw("Mode: "),
+                    Span::styled(mode_str, Style::default().fg(Color::Cyan)),
+                ]));
 
-            food_lines.push(Line::from(format!(
-                "Time at Temp: {}s",
-                data.seconds_above_threshold
-            )));
+                // Product name
+                let product_name = get_product_name(config.product, config.mode);
+                food_lines.push(Line::from(vec![
+                    Span::raw("Product: "),
+                    Span::styled(product_name, Style::default().fg(Color::White)),
+                ]));
+
+                // Show threshold/target based on mode
+                if config.mode == FoodSafeMode::Integrated {
+                    // Progress bar for log reduction
+                    let progress = data.progress_percent();
+                    let bar_width: usize = 12;
+                    let filled = ((progress / 100.0) * bar_width as f64) as usize;
+                    let empty = bar_width.saturating_sub(filled);
+                    let bar = format!("[{}{}]", "█".repeat(filled), "░".repeat(empty));
+
+                    food_lines.push(Line::from(vec![
+                        Span::raw("Log Red: "),
+                        Span::styled(
+                            format!("{:.2}/{:.1}", data.log_reduction, config.target_log_reduction),
+                            Style::default().fg(Color::Yellow),
+                        ),
+                    ]));
+                    food_lines.push(Line::from(Span::styled(bar, Style::default().fg(Color::Green))));
+                } else {
+                    food_lines.push(Line::from(vec![
+                        Span::raw("Target: "),
+                        Span::styled(
+                            app.temperature_unit.format(config.threshold_temperature),
+                            Style::default().fg(Color::Yellow),
+                        ),
+                    ]));
+                }
+
+                // Time at temp
+                food_lines.push(Line::from(vec![
+                    Span::raw("Time@Temp: "),
+                    Span::raw(format!("{}s", data.seconds_above_threshold)),
+                ]));
+
+                // Serving mode
+                let serving_str = match config.serving {
+                    Serving::ServedImmediately => "Immediate",
+                    Serving::CookedAndChilled => "Chilled",
+                };
+                food_lines.push(Line::from(vec![
+                    Span::raw("Serving: "),
+                    Span::styled(serving_str, Style::default().fg(Color::Magenta)),
+                ]));
+            } else {
+                // Legacy display without config
+                let status_style = match data.serving_state {
+                    FoodSafeServingState::SafeToServe => Style::default().fg(Color::Green),
+                    FoodSafeServingState::NotSafe => Style::default().fg(Color::Red),
+                };
+
+                food_lines.push(Line::from(vec![
+                    Span::raw("Serving: "),
+                    Span::styled(format!("{:?}", data.serving_state), status_style),
+                ]));
+
+                food_lines.push(Line::from(format!(
+                    "Progress: {:.1}%",
+                    data.progress_percent()
+                )));
+
+                food_lines.push(Line::from(format!(
+                    "Time@Temp: {}s",
+                    data.seconds_above_threshold
+                )));
+            }
         } else {
-            food_lines.push(Line::from("Not configured"));
-            food_lines.push(Line::from("Press [F] to set"));
+            food_lines.push(Line::from(Span::styled(
+                "Not configured",
+                Style::default().fg(Color::DarkGray),
+            )));
+            food_lines.push(Line::from(""));
+            food_lines.push(Line::from(vec![
+                Span::styled("[F]", Style::default().fg(Color::Yellow)),
+                Span::raw(" Configure"),
+            ]));
+            food_lines.push(Line::from(vec![
+                Span::styled("[X]", Style::default().fg(Color::Yellow)),
+                Span::raw(" Reset"),
+            ]));
         }
     }
 
     let food_para = Paragraph::new(food_lines).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Food Safety "),
+            .title(" Food Safety (SafeCook) "),
     );
     frame.render_widget(food_para, chunks[0]);
 
@@ -1133,7 +1371,12 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_dialog(frame: &mut Frame, dialog: &DialogState, area: Rect) {
-    let dialog_area = centered_rect(50, 40, area);
+    // Use larger dialog for FoodSafe
+    let dialog_area = if matches!(dialog.dialog_type, DialogType::SetFoodSafe) {
+        centered_rect(60, 60, area)
+    } else {
+        centered_rect(50, 40, area)
+    };
 
     // Clear the area
     frame.render_widget(Clear, dialog_area);
@@ -1190,37 +1433,177 @@ fn render_dialog(frame: &mut Frame, dialog: &DialogState, area: Rect) {
             (" Set Probe ID ", content)
         }
         DialogType::SetFoodSafe => {
-            let products = [
-                "Chicken Breast",
-                "Ground Beef",
-                "Beef Steak",
-                "Pork Chop",
-                "Salmon",
-            ];
-            let mut content = vec![Line::from("Select food product:")];
+            let fs = &dialog.food_safe;
+            let mut content = vec![];
+
+            // Stage indicator
+            let stage_names = ["Mode", "Product", "Serving"];
+            let stage_line = stage_names
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    if i == fs.stage {
+                        Span::styled(
+                            format!("[{}]", name),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    } else if i < fs.stage {
+                        Span::styled(format!("[{}✓]", name), Style::default().fg(Color::Green))
+                    } else {
+                        Span::styled(format!("[{}]", name), Style::default().fg(Color::DarkGray))
+                    }
+                })
+                .collect::<Vec<_>>();
+            content.push(Line::from(stage_line));
             content.push(Line::from(""));
 
-            for (i, product) in products.iter().enumerate() {
-                let style = if i == dialog.selected_option {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
-                let prefix = if i == dialog.selected_option {
-                    "> "
-                } else {
-                    "  "
-                };
-                content.push(Line::from(Span::styled(
-                    format!("{}{}", prefix, product),
-                    style,
-                )));
+            match fs.stage {
+                0 => {
+                    // Mode selection
+                    content.push(Line::from(Span::styled(
+                        "Select Food Safe Mode:",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )));
+                    content.push(Line::from(""));
+
+                    let modes = [
+                        ("Simplified", "USDA instant temperature thresholds"),
+                        ("Integrated", "Time-temperature log reduction"),
+                    ];
+
+                    for (i, (name, desc)) in modes.iter().enumerate() {
+                        let is_selected = i == fs.selected_mode;
+                        let style = if is_selected {
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default()
+                        };
+                        let prefix = if is_selected { "● " } else { "○ " };
+                        content.push(Line::from(Span::styled(
+                            format!("{}{}", prefix, name),
+                            style,
+                        )));
+                        content.push(Line::from(Span::styled(
+                            format!("    {}", desc),
+                            Style::default().fg(Color::DarkGray),
+                        )));
+                    }
+                }
+                1 => {
+                    // Product selection
+                    let mode_name = if fs.selected_mode == 0 {
+                        "Simplified"
+                    } else {
+                        "Integrated"
+                    };
+                    content.push(Line::from(Span::styled(
+                        format!("Select Product ({} Mode):", mode_name),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )));
+                    content.push(Line::from(""));
+
+                    let products: Vec<&str> = if fs.selected_mode == 0 {
+                        get_simplified_products()
+                            .iter()
+                            .map(|(_, name)| *name)
+                            .collect()
+                    } else {
+                        get_integrated_products()
+                            .iter()
+                            .map(|(_, name)| *name)
+                            .collect()
+                    };
+
+                    // Show scrollable list (max 10 items visible)
+                    let start_idx = if fs.selected_product >= 8 {
+                        fs.selected_product - 7
+                    } else {
+                        0
+                    };
+                    let end_idx = (start_idx + 10).min(products.len());
+
+                    if start_idx > 0 {
+                        content.push(Line::from(Span::styled(
+                            "  ↑ more above...",
+                            Style::default().fg(Color::DarkGray),
+                        )));
+                    }
+
+                    for (i, product) in products
+                        .iter()
+                        .enumerate()
+                        .skip(start_idx)
+                        .take(end_idx - start_idx)
+                    {
+                        let is_selected = i == fs.selected_product;
+                        let style = if is_selected {
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default()
+                        };
+                        let prefix = if is_selected { "> " } else { "  " };
+                        content.push(Line::from(Span::styled(
+                            format!("{}{}", prefix, product),
+                            style,
+                        )));
+                    }
+
+                    if end_idx < products.len() {
+                        content.push(Line::from(Span::styled(
+                            "  ↓ more below...",
+                            Style::default().fg(Color::DarkGray),
+                        )));
+                    }
+                }
+                2 => {
+                    // Serving selection
+                    content.push(Line::from(Span::styled(
+                        "Select Serving Mode:",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )));
+                    content.push(Line::from(""));
+
+                    let servings = [
+                        ("Served Immediately", "Food served right after cooking"),
+                        ("Cooked and Chilled", "Food chilled for later use"),
+                    ];
+
+                    for (i, (name, desc)) in servings.iter().enumerate() {
+                        let is_selected = i == fs.selected_serving;
+                        let style = if is_selected {
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default()
+                        };
+                        let prefix = if is_selected { "● " } else { "○ " };
+                        content.push(Line::from(Span::styled(
+                            format!("{}{}", prefix, name),
+                            style,
+                        )));
+                        content.push(Line::from(Span::styled(
+                            format!("    {}", desc),
+                            Style::default().fg(Color::DarkGray),
+                        )));
+                    }
+                }
+                _ => {}
             }
 
             content.push(Line::from(""));
-            content.push(Line::from("[↑↓] Select  [Enter] Confirm  [Esc] Cancel"));
+            let nav_help = if fs.stage == 2 {
+                "[↑↓] Select  [Enter] Confirm  [←] Back  [Esc] Cancel"
+            } else {
+                "[↑↓] Select  [Enter/→] Next  [←] Back  [Esc] Cancel"
+            };
+            content.push(Line::from(nav_help));
             (" Configure Food Safety ", content)
         }
         DialogType::SetProbeColor => {
@@ -1409,8 +1792,30 @@ async fn run_app(terminal: &mut Terminal, mut app: App) -> Result<()> {
                             KeyCode::Esc => {
                                 app.close_dialog();
                             }
-                            KeyCode::Enter => {
-                                let _ = app.handle_dialog_confirm().await;
+                            KeyCode::Enter | KeyCode::Right => {
+                                // For FoodSafe, Enter/Right advances to next stage
+                                if matches!(dialog.dialog_type, DialogType::SetFoodSafe) {
+                                    if dialog.food_safe.stage < 2 {
+                                        dialog.food_safe.stage += 1;
+                                        // Reset product selection when changing mode
+                                        if dialog.food_safe.stage == 1 {
+                                            dialog.food_safe.selected_product = 0;
+                                        }
+                                    } else {
+                                        // Final stage - confirm
+                                        let _ = app.handle_dialog_confirm().await;
+                                    }
+                                } else {
+                                    let _ = app.handle_dialog_confirm().await;
+                                }
+                            }
+                            KeyCode::Left => {
+                                // For FoodSafe, go back to previous stage
+                                if matches!(dialog.dialog_type, DialogType::SetFoodSafe) {
+                                    if dialog.food_safe.stage > 0 {
+                                        dialog.food_safe.stage -= 1;
+                                    }
+                                }
                             }
                             KeyCode::Char(c) => {
                                 dialog.input.push(c);
@@ -1422,6 +1827,30 @@ async fn run_app(terminal: &mut Terminal, mut app: App) -> Result<()> {
                                 DialogType::SetPrediction => {
                                     if dialog.selected_mode > 0 {
                                         dialog.selected_mode -= 1;
+                                    }
+                                }
+                                DialogType::SetFoodSafe => {
+                                    // Navigate within current stage
+                                    match dialog.food_safe.stage {
+                                        0 => {
+                                            // Mode selection
+                                            if dialog.food_safe.selected_mode > 0 {
+                                                dialog.food_safe.selected_mode -= 1;
+                                            }
+                                        }
+                                        1 => {
+                                            // Product selection
+                                            if dialog.food_safe.selected_product > 0 {
+                                                dialog.food_safe.selected_product -= 1;
+                                            }
+                                        }
+                                        2 => {
+                                            // Serving selection
+                                            if dialog.food_safe.selected_serving > 0 {
+                                                dialog.food_safe.selected_serving -= 1;
+                                            }
+                                        }
+                                        _ => {}
                                     }
                                 }
                                 _ => {
@@ -1437,8 +1866,33 @@ async fn run_app(terminal: &mut Terminal, mut app: App) -> Result<()> {
                                     }
                                 }
                                 DialogType::SetFoodSafe => {
-                                    if dialog.selected_option < 4 {
-                                        dialog.selected_option += 1;
+                                    // Navigate within current stage
+                                    match dialog.food_safe.stage {
+                                        0 => {
+                                            // Mode selection (2 options)
+                                            if dialog.food_safe.selected_mode < 1 {
+                                                dialog.food_safe.selected_mode += 1;
+                                            }
+                                        }
+                                        1 => {
+                                            // Product selection
+                                            let max_products = if dialog.food_safe.selected_mode == 0
+                                            {
+                                                get_simplified_products().len() - 1
+                                            } else {
+                                                get_integrated_products().len() - 1
+                                            };
+                                            if dialog.food_safe.selected_product < max_products {
+                                                dialog.food_safe.selected_product += 1;
+                                            }
+                                        }
+                                        2 => {
+                                            // Serving selection (2 options)
+                                            if dialog.food_safe.selected_serving < 1 {
+                                                dialog.food_safe.selected_serving += 1;
+                                            }
+                                        }
+                                        _ => {}
                                     }
                                 }
                                 DialogType::SetProbeColor => {

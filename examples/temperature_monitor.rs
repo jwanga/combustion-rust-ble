@@ -163,10 +163,15 @@ fn display_temperatures(probe: &combustion_rust_ble::Probe) {
             let hours = total_secs / 3600;
             let mins = (total_secs % 3600) / 60;
             let secs = total_secs % 60;
-            println!("  Target: {:.1}°C", prediction.set_point_temperature);
             println!(
-                "  Estimated Core: {:.1}°C",
-                prediction.estimated_core_temperature
+                "  Target: {:.1}°C ({:.1}°F)",
+                prediction.set_point_temperature,
+                celsius_to_fahrenheit(prediction.set_point_temperature)
+            );
+            println!(
+                "  Estimated Core: {:.1}°C ({:.1}°F)",
+                prediction.estimated_core_temperature,
+                celsius_to_fahrenheit(prediction.estimated_core_temperature)
             );
             println!(
                 "  Time Remaining: {:02}:{:02}:{:02} ({} seconds)",

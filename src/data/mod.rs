@@ -9,7 +9,10 @@ pub mod prediction;
 pub mod session;
 pub mod temperatures;
 
-pub use food_safety::{FoodSafeData, FoodSafeProduct, FoodSafeServingState};
+pub use food_safety::{
+    FoodSafeConfig, FoodSafeData, FoodSafeMode, FoodSafeProduct, FoodSafeServingState,
+    FoodSafeState, FoodSafeStatus, IntegratedProduct, Serving, SimplifiedProduct,
+};
 pub use log::{LoggedDataPoint, PredictionLog, TemperatureLog};
 pub use prediction::{PredictionInfo, PredictionMode, PredictionState, PredictionType};
 pub use session::SessionInfo;

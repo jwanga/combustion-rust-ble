@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
     // Wait a moment for notifications to start
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    println!("\n[INFO] Setting prediction target to 63.0°C with TimeToRemoval mode...");
+    println!("\n[INFO] Setting prediction target to 63.0°C (145.4°F) with TimeToRemoval mode...");
     match probe
         .set_prediction(PredictionMode::TimeToRemoval, 63.0)
         .await

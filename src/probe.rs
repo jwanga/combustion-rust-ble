@@ -17,8 +17,8 @@ use crate::ble::characteristics::CharacteristicHandler;
 use crate::ble::connection::{ConnectionManager, ConnectionState};
 use crate::ble::uuids::*;
 use crate::data::{
-    FoodSafeData, FoodSafeProduct, PredictionInfo, PredictionMode, ProbeTemperatures, SessionInfo,
-    TemperatureLog, VirtualTemperatures,
+    FoodSafeConfig, FoodSafeData, FoodSafeProduct, PredictionInfo, PredictionMode,
+    ProbeTemperatures, Serving, SessionInfo, TemperatureLog, VirtualTemperatures,
 };
 use crate::error::{Error, Result};
 use crate::protocol::uart_messages::*;
@@ -323,6 +323,8 @@ impl Probe {
 
         self.connection.connect(true).await?;
 
+        info!("Connected to probe {}", self.serial_number_string());
+
         // Set up characteristics handler
         let handler = CharacteristicHandler::new(self.connection.peripheral().clone());
         handler.discover_characteristics().await?;
@@ -393,10 +395,14 @@ impl Probe {
                     match ProbeStatus::parse(&event.data) {
                         Ok(status) => {
                             debug!(
-                                "Parsed status: prediction={:?}",
+                                "Parsed status: prediction={:?}, food_safe_status={:?}",
                                 status.prediction.as_ref().map(|p| format!(
                                     "state={:?}, mode={:?}, setpoint={:.1}",
                                     p.state, p.mode, p.set_point_temperature
+                                )),
+                                status.food_safe_status.as_ref().map(|fs| format!(
+                                    "state={:?}, log_red={:.1}, secs={}",
+                                    fs.state, fs.log_reduction, fs.seconds_above_threshold
                                 ))
                             );
 
@@ -411,6 +417,44 @@ impl Probe {
                             state.min_sequence = status.min_sequence_number;
                             state.max_sequence = status.max_sequence_number;
                             state.prediction = status.prediction.clone();
+
+                            // Update food safe data from status
+                            // Handle both local and external (e.g., iOS app) food safe configuration
+                            match (&status.food_safe_config, &status.food_safe_status) {
+                                (Some(config), Some(fs_status)) => {
+                                    if let Some(ref mut food_safe_data) = state.food_safe_data {
+                                        // Update existing data with new status
+                                        food_safe_data.update_from_status(fs_status.clone());
+                                        // Also update config in case it changed externally
+                                        food_safe_data.update_config(config.clone());
+                                    } else {
+                                        // Create new food safe data from external config/status
+                                        state.food_safe_data = Some(FoodSafeData::from_config_and_status(
+                                            config.clone(),
+                                            fs_status.clone(),
+                                        ));
+                                    }
+                                }
+                                (Some(config), None) => {
+                                    // Config but no status yet - create data with config only
+                                    if state.food_safe_data.is_none() {
+                                        state.food_safe_data = Some(FoodSafeData::with_config(config.clone()));
+                                    } else if let Some(ref mut food_safe_data) = state.food_safe_data {
+                                        food_safe_data.update_config(config.clone());
+                                    }
+                                }
+                                (None, Some(fs_status)) => {
+                                    // Status but no config - update if we have existing data
+                                    if let Some(ref mut food_safe_data) = state.food_safe_data {
+                                        food_safe_data.update_from_status(fs_status.clone());
+                                    }
+                                }
+                                (None, None) => {
+                                    // No food safe data - clear if not configured locally
+                                    // Don't clear here as it might have been set locally
+                                }
+                            }
+
                             state.last_update = now;
 
                             // Reset stale flag
@@ -613,18 +657,53 @@ impl Probe {
 
     // === Food Safety ===
 
-    /// Configure food safety monitoring.
+    /// Configure food safety monitoring with a product type (simplified mode).
+    ///
+    /// This uses simplified mode which applies predefined USDA temperature thresholds
+    /// based on the product type.
     pub async fn configure_food_safe(&self, product: FoodSafeProduct) -> Result<()> {
+        let config = product.to_config(Serving::ServedImmediately);
+        self.configure_food_safe_with_config(config).await
+    }
+
+    /// Configure food safety monitoring with a product type and serving mode (simplified mode).
+    pub async fn configure_food_safe_with_serving(
+        &self,
+        product: FoodSafeProduct,
+        serving: Serving,
+    ) -> Result<()> {
+        let config = product.to_config(serving);
+        self.configure_food_safe_with_config(config).await
+    }
+
+    /// Configure food safety monitoring with full configuration (integrated mode).
+    ///
+    /// This allows specifying custom parameters for time-temperature integration
+    /// including Z-value, D-value, reference temperature, and target log reduction.
+    pub async fn configure_food_safe_with_config(&self, config: FoodSafeConfig) -> Result<()> {
         if !self.connection.is_connected() {
             return Err(Error::NotConnected);
         }
 
-        let message = build_configure_food_safe_request(product.to_raw());
+        let config_bytes = config.to_bytes();
+        let message = build_configure_food_safe_request(&config_bytes);
         self.send_uart_message(&message).await?;
 
-        self.state.write().food_safe_data = Some(FoodSafeData::new(product));
+        self.state.write().food_safe_data = Some(FoodSafeData::with_config(config));
 
         Ok(())
+    }
+
+    /// Configure food safety monitoring with integrated mode for a product.
+    ///
+    /// Integrated mode calculates log reduction based on time-temperature integration.
+    pub async fn configure_food_safe_integrated(
+        &self,
+        product: FoodSafeProduct,
+        serving: Serving,
+    ) -> Result<()> {
+        let config = product.to_integrated_config(serving);
+        self.configure_food_safe_with_config(config).await
     }
 
     /// Reset food safety calculations.

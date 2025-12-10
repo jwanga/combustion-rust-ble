@@ -4,8 +4,8 @@
 
 use crate::ble::advertising::{BatteryStatus, Overheating, ProbeColor, ProbeId, ProbeMode};
 use crate::data::{
-    PredictionInfo, PredictionMode, PredictionState, PredictionType, ProbeTemperatures,
-    VirtualSensorSelection, VirtualTemperatures,
+    FoodSafeConfig, FoodSafeStatus, PredictionInfo, PredictionMode, PredictionState,
+    PredictionType, ProbeTemperatures, VirtualSensorSelection, VirtualTemperatures,
 };
 use crate::error::{Error, Result};
 
@@ -30,6 +30,10 @@ pub struct ProbeStatus {
     pub virtual_temperatures: VirtualTemperatures,
     /// Prediction information.
     pub prediction: Option<PredictionInfo>,
+    /// Food safe configuration (if configured).
+    pub food_safe_config: Option<FoodSafeConfig>,
+    /// Food safe status (current state of food safety calculations).
+    pub food_safe_status: Option<FoodSafeStatus>,
     /// Overheating information.
     pub overheating: Overheating,
 }
@@ -111,6 +115,28 @@ impl ProbeStatus {
         let prediction = Self::parse_prediction_status(&data[23..30]);
         debug!("Parsed prediction: {:?}", prediction);
 
+        // Bytes 30-39: Food Safe Data (10 bytes) - optional
+        let food_safe_config = if data.len() >= 40 {
+            debug!(
+                "Parsing food safe config from bytes 30-39: {:02X?}",
+                &data[30..40]
+            );
+            FoodSafeConfig::from_bytes(&data[30..40])
+        } else {
+            None
+        };
+
+        // Bytes 40-47: Food Safe Status (8 bytes) - optional
+        let food_safe_status = if data.len() >= 48 {
+            debug!(
+                "Parsing food safe status from bytes 40-47: {:02X?}",
+                &data[40..48]
+            );
+            FoodSafeStatus::from_bytes(&data[40..48])
+        } else {
+            None
+        };
+
         // Byte 48: Overheating Sensors (if available)
         let overheating = if data.len() > 48 {
             Overheating::new(data[48])
@@ -128,6 +154,8 @@ impl ProbeStatus {
             battery_status,
             virtual_temperatures,
             prediction,
+            food_safe_config,
+            food_safe_status,
             overheating,
         })
     }
