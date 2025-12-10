@@ -4,8 +4,9 @@
 
 use crate::ble::advertising::{BatteryStatus, Overheating, ProbeColor, ProbeId, ProbeMode};
 use crate::data::{
-    FoodSafeConfig, FoodSafeStatus, PredictionInfo, PredictionMode, PredictionState,
-    PredictionType, ProbeTemperatures, VirtualSensorSelection, VirtualTemperatures,
+    AlarmConfig, FoodSafeConfig, FoodSafeStatus, PowerMode, PredictionInfo, PredictionMode,
+    PredictionState, PredictionType, ProbeTemperatures, ThermometerPreferences,
+    VirtualSensorSelection, VirtualTemperatures,
 };
 use crate::error::{Error, Result};
 
@@ -36,6 +37,10 @@ pub struct ProbeStatus {
     pub food_safe_status: Option<FoodSafeStatus>,
     /// Overheating information.
     pub overheating: Overheating,
+    /// Thermometer preferences (power mode and reserved settings).
+    pub thermometer_preferences: Option<ThermometerPreferences>,
+    /// High and low temperature alarm configuration.
+    pub alarm_config: Option<AlarmConfig>,
 }
 
 impl ProbeStatus {
@@ -144,6 +149,32 @@ impl ProbeStatus {
             Overheating::default()
         };
 
+        // Byte 49: Thermometer Preferences (if available)
+        // - Bits 0-1: Power mode (0=Normal, 1=Always On)
+        // - Bits 2-7: Reserved
+        let thermometer_preferences = if data.len() > 49 {
+            debug!(
+                "Parsing thermometer preferences from byte 49: {:02X}",
+                data[49]
+            );
+            Some(ThermometerPreferences::from_byte(data[49]))
+        } else {
+            None
+        };
+
+        // Bytes 50-93: Alarm Status Arrays (if available)
+        // - Bytes 50-71: High Alarm Status array (22 bytes, 11 alarms × 2 bytes each)
+        // - Bytes 72-93: Low Alarm Status array (22 bytes, 11 alarms × 2 bytes each)
+        let alarm_config = if data.len() >= 94 {
+            debug!(
+                "Parsing alarm config from bytes 50-93: {:02X?}",
+                &data[50..94]
+            );
+            AlarmConfig::from_bytes(&data[50..94])
+        } else {
+            None
+        };
+
         Ok(Self {
             min_sequence_number,
             max_sequence_number,
@@ -157,6 +188,8 @@ impl ProbeStatus {
             food_safe_config,
             food_safe_status,
             overheating,
+            thermometer_preferences,
+            alarm_config,
         })
     }
 
@@ -290,6 +323,42 @@ impl ProbeStatus {
     /// Check if the probe has logs available.
     pub fn has_logs(&self) -> bool {
         self.max_sequence_number >= self.min_sequence_number
+    }
+
+    /// Get the current power mode, if available.
+    pub fn power_mode(&self) -> Option<PowerMode> {
+        self.thermometer_preferences.map(|p| p.power_mode)
+    }
+
+    /// Check if the probe is in always-on mode.
+    pub fn is_always_on(&self) -> bool {
+        self.thermometer_preferences
+            .map(|p| p.is_always_on())
+            .unwrap_or(false)
+    }
+
+    /// Check if any alarm is currently triggered.
+    pub fn any_alarm_tripped(&self) -> bool {
+        self.alarm_config
+            .as_ref()
+            .map(|c| c.any_tripped())
+            .unwrap_or(false)
+    }
+
+    /// Check if any alarm is currently sounding.
+    pub fn any_alarm_alarming(&self) -> bool {
+        self.alarm_config
+            .as_ref()
+            .map(|c| c.any_alarming())
+            .unwrap_or(false)
+    }
+
+    /// Check if any alarm is enabled.
+    pub fn any_alarm_enabled(&self) -> bool {
+        self.alarm_config
+            .as_ref()
+            .map(|c| c.any_enabled())
+            .unwrap_or(false)
     }
 }
 

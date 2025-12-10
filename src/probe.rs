@@ -17,8 +17,9 @@ use crate::ble::characteristics::CharacteristicHandler;
 use crate::ble::connection::{ConnectionManager, ConnectionState};
 use crate::ble::uuids::*;
 use crate::data::{
-    FoodSafeConfig, FoodSafeData, FoodSafeProduct, PredictionInfo, PredictionMode,
-    ProbeTemperatures, Serving, SessionInfo, TemperatureLog, VirtualTemperatures,
+    AlarmConfig, FoodSafeConfig, FoodSafeData, FoodSafeProduct, PowerMode, PredictionInfo,
+    PredictionMode, ProbeTemperatures, Serving, SessionInfo, TemperatureLog,
+    ThermometerPreferences, VirtualTemperatures,
 };
 use crate::error::{Error, Result};
 use crate::protocol::uart_messages::*;
@@ -102,6 +103,10 @@ struct ProbeState {
     rssi: Option<i16>,
     /// Last update time.
     last_update: Instant,
+    /// Thermometer preferences (power mode).
+    thermometer_preferences: Option<ThermometerPreferences>,
+    /// Alarm configuration.
+    alarm_config: Option<AlarmConfig>,
 }
 
 impl ProbeState {
@@ -125,6 +130,8 @@ impl ProbeState {
             session_info: None,
             rssi: None,
             last_update: Instant::now(),
+            thermometer_preferences: None,
+            alarm_config: None,
         }
     }
 }
@@ -417,6 +424,10 @@ impl Probe {
                             state.min_sequence = status.min_sequence_number;
                             state.max_sequence = status.max_sequence_number;
                             state.prediction = status.prediction.clone();
+
+                            // Update thermometer preferences and alarm config from status
+                            state.thermometer_preferences = status.thermometer_preferences;
+                            state.alarm_config = status.alarm_config.clone();
 
                             // Update food safe data from status
                             // Handle both local and external (e.g., iOS app) food safe configuration
@@ -740,6 +751,159 @@ impl Probe {
     /// Get current operational mode.
     pub fn mode(&self) -> ProbeMode {
         self.state.read().mode
+    }
+
+    // === Power Mode & Preferences ===
+
+    /// Get current power mode.
+    ///
+    /// Returns `None` if the probe hasn't sent thermometer preferences yet.
+    pub fn power_mode(&self) -> Option<PowerMode> {
+        self.state
+            .read()
+            .thermometer_preferences
+            .map(|p| p.power_mode)
+    }
+
+    /// Check if the probe is in always-on mode.
+    pub fn is_always_on(&self) -> bool {
+        self.state
+            .read()
+            .thermometer_preferences
+            .map(|p| p.is_always_on())
+            .unwrap_or(false)
+    }
+
+    /// Get thermometer preferences.
+    pub fn thermometer_preferences(&self) -> Option<ThermometerPreferences> {
+        self.state.read().thermometer_preferences
+    }
+
+    /// Set the power mode.
+    ///
+    /// - `PowerMode::Normal`: Probe will auto power-off when placed in charger.
+    /// - `PowerMode::AlwaysOn`: Probe stays powered even in charger.
+    pub async fn set_power_mode(&self, mode: PowerMode) -> Result<()> {
+        if !self.connection.is_connected() {
+            return Err(Error::NotConnected);
+        }
+
+        let message = build_set_power_mode_request(mode.to_raw());
+        self.send_uart_message(&message).await?;
+
+        // Update local state
+        let mut state = self.state.write();
+        state.thermometer_preferences = Some(ThermometerPreferences::with_power_mode(mode));
+
+        Ok(())
+    }
+
+    /// Reset the thermometer to factory defaults.
+    ///
+    /// This will reset all settings including probe ID, color, alarms, etc.
+    pub async fn reset_thermometer(&self) -> Result<()> {
+        if !self.connection.is_connected() {
+            return Err(Error::NotConnected);
+        }
+
+        let message = build_reset_thermometer_request();
+        self.send_uart_message(&message).await
+    }
+
+    // === Temperature Alarms ===
+
+    /// Get current alarm configuration.
+    ///
+    /// Returns `None` if the probe hasn't sent alarm status yet.
+    pub fn alarm_config(&self) -> Option<AlarmConfig> {
+        self.state.read().alarm_config.clone()
+    }
+
+    /// Check if any alarm is currently triggered.
+    pub fn any_alarm_tripped(&self) -> bool {
+        self.state
+            .read()
+            .alarm_config
+            .as_ref()
+            .map(|c| c.any_tripped())
+            .unwrap_or(false)
+    }
+
+    /// Check if any alarm is currently sounding.
+    pub fn any_alarm_alarming(&self) -> bool {
+        self.state
+            .read()
+            .alarm_config
+            .as_ref()
+            .map(|c| c.any_alarming())
+            .unwrap_or(false)
+    }
+
+    /// Check if any alarm is enabled.
+    pub fn any_alarm_enabled(&self) -> bool {
+        self.state
+            .read()
+            .alarm_config
+            .as_ref()
+            .map(|c| c.any_enabled())
+            .unwrap_or(false)
+    }
+
+    /// Set temperature alarms.
+    ///
+    /// Configures high and low temperature alarms for all sensors (T1-T8) and
+    /// virtual sensors (Core, Surface, Ambient).
+    ///
+    /// See `AlarmConfig` for how to configure individual alarms.
+    pub async fn set_alarms(&self, config: &AlarmConfig) -> Result<()> {
+        if !self.connection.is_connected() {
+            return Err(Error::NotConnected);
+        }
+
+        let config_bytes = config.to_bytes();
+        let message = build_set_high_low_alarms_request(&config_bytes);
+        self.send_uart_message(&message).await?;
+
+        // Update local state
+        self.state.write().alarm_config = Some(config.clone());
+
+        Ok(())
+    }
+
+    /// Silence any currently sounding alarms.
+    pub async fn silence_alarms(&self) -> Result<()> {
+        if !self.connection.is_connected() {
+            return Err(Error::NotConnected);
+        }
+
+        let message = build_silence_alarms_request();
+        self.send_uart_message(&message).await
+    }
+
+    /// Set a high temperature alarm for the core (virtual) sensor.
+    ///
+    /// This is a convenience method that creates an alarm config with just
+    /// the core high alarm set.
+    pub async fn set_core_high_alarm(&self, temperature_celsius: f64) -> Result<()> {
+        let mut config = self.alarm_config().unwrap_or_default();
+        config.set_core_high_alarm(temperature_celsius, true);
+        self.set_alarms(&config).await
+    }
+
+    /// Set a low temperature alarm for the core (virtual) sensor.
+    ///
+    /// This is a convenience method that creates an alarm config with just
+    /// the core low alarm set.
+    pub async fn set_core_low_alarm(&self, temperature_celsius: f64) -> Result<()> {
+        let mut config = self.alarm_config().unwrap_or_default();
+        config.set_core_low_alarm(temperature_celsius, true);
+        self.set_alarms(&config).await
+    }
+
+    /// Disable all alarms.
+    pub async fn disable_all_alarms(&self) -> Result<()> {
+        let config = AlarmConfig::new();
+        self.set_alarms(&config).await
     }
 
     // === Configuration ===

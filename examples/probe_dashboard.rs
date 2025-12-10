@@ -6,6 +6,8 @@
 //! - Discovering and monitoring multiple probes simultaneously
 //! - Real-time temperature visualization
 //! - Prediction and food safety configuration
+//! - Temperature alarm configuration and monitoring
+//! - Power mode control
 //! - Log synchronization and export
 //! - Debugging connectivity and protocol issues
 //!
@@ -19,6 +21,10 @@
 //! | `C` | Cancel prediction |
 //! | `F` | Configure food safety |
 //! | `X` | Reset food safety |
+//! | `A` | Configure temperature alarms |
+//! | `M` | Silence alarms |
+//! | `W` | Toggle power mode |
+//! | `R` | Reset thermometer |
 //! | `I` | Set probe ID |
 //! | `O` | Cycle probe color |
 //! | `L` | Download logs |
@@ -30,9 +36,9 @@
 
 use combustion_rust_ble::{
     celsius_to_fahrenheit, BatteryStatus, ConnectionState, DeviceManager, FoodSafeConfig,
-    FoodSafeMode, FoodSafeServingState, FoodSafeState, IntegratedProduct, PredictionMode,
-    PredictionState, PredictionType, Probe, ProbeColor, ProbeMode, Result, Serving,
-    SimplifiedProduct,
+    FoodSafeMode, FoodSafeServingState, FoodSafeState, IntegratedProduct, PowerMode,
+    PredictionMode, PredictionState, PredictionType, Probe, ProbeColor, ProbeMode, Result,
+    Serving, SimplifiedProduct,
 };
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
@@ -119,7 +125,20 @@ enum DialogType {
     SetFoodSafe,
     SetProbeId,
     SetProbeColor,
+    SetAlarm,
+    ConfirmReset,
     Help,
+}
+
+/// Alarm dialog sub-state
+#[derive(Clone, Default)]
+struct AlarmDialogState {
+    /// 0 = Core High, 1 = Core Low, 2 = Surface High, 3 = Ambient Low, 4 = Disable All
+    selected_alarm_type: usize,
+    /// Temperature input for alarm threshold
+    temp_input: String,
+    /// Current stage: 0 = select type, 1 = enter temp (if applicable)
+    stage: usize,
 }
 
 /// Food Safe dialog sub-state
@@ -146,6 +165,8 @@ struct DialogState {
     selected_mode: usize,
     /// Food safe dialog state
     food_safe: FoodSafeDialogState,
+    /// Alarm dialog state
+    alarm: AlarmDialogState,
 }
 
 /// Main application state
@@ -312,6 +333,7 @@ impl App {
             input_stage: 0,
             selected_mode: 0,
             food_safe: FoodSafeDialogState::default(),
+            alarm: AlarmDialogState::default(),
         });
     }
 
@@ -423,6 +445,69 @@ impl App {
                         }
                     }
                 }
+                DialogType::SetAlarm => {
+                    let alarm = &dialog.alarm;
+                    if let Some(probe) = self.selected_probe().cloned() {
+                        match alarm.selected_alarm_type {
+                            0 => {
+                                // Core High
+                                if let Ok(temp) = alarm.temp_input.parse::<f64>() {
+                                    probe.set_core_high_alarm(temp).await?;
+                                    self.log(
+                                        LogLevel::Info,
+                                        format!("Set core HIGH alarm to {:.1}°C", temp),
+                                    );
+                                }
+                            }
+                            1 => {
+                                // Core Low
+                                if let Ok(temp) = alarm.temp_input.parse::<f64>() {
+                                    probe.set_core_low_alarm(temp).await?;
+                                    self.log(
+                                        LogLevel::Info,
+                                        format!("Set core LOW alarm to {:.1}°C", temp),
+                                    );
+                                }
+                            }
+                            2 => {
+                                // Surface High
+                                if let Ok(temp) = alarm.temp_input.parse::<f64>() {
+                                    let mut config = probe.alarm_config().unwrap_or_default();
+                                    config.set_surface_high_alarm(temp, true);
+                                    probe.set_alarms(&config).await?;
+                                    self.log(
+                                        LogLevel::Info,
+                                        format!("Set surface HIGH alarm to {:.1}°C", temp),
+                                    );
+                                }
+                            }
+                            3 => {
+                                // Ambient Low
+                                if let Ok(temp) = alarm.temp_input.parse::<f64>() {
+                                    let mut config = probe.alarm_config().unwrap_or_default();
+                                    config.set_ambient_low_alarm(temp, true);
+                                    probe.set_alarms(&config).await?;
+                                    self.log(
+                                        LogLevel::Info,
+                                        format!("Set ambient LOW alarm to {:.1}°C", temp),
+                                    );
+                                }
+                            }
+                            4 => {
+                                // Disable All
+                                probe.disable_all_alarms().await?;
+                                self.log(LogLevel::Info, "Disabled all alarms");
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                DialogType::ConfirmReset => {
+                    if let Some(probe) = self.selected_probe().cloned() {
+                        probe.reset_thermometer().await?;
+                        self.log(LogLevel::Warn, "Thermometer reset to factory defaults");
+                    }
+                }
                 DialogType::Help => {}
             }
         }
@@ -441,6 +526,27 @@ impl App {
         if let Some(probe) = self.selected_probe().cloned() {
             probe.reset_food_safe().await?;
             self.log(LogLevel::Info, "Reset food safety");
+        }
+        Ok(())
+    }
+
+    async fn silence_alarms(&mut self) -> Result<()> {
+        if let Some(probe) = self.selected_probe().cloned() {
+            probe.silence_alarms().await?;
+            self.log(LogLevel::Info, "Silenced alarms");
+        }
+        Ok(())
+    }
+
+    async fn toggle_power_mode(&mut self) -> Result<()> {
+        if let Some(probe) = self.selected_probe().cloned() {
+            let current = probe.power_mode().unwrap_or(PowerMode::Normal);
+            let new_mode = match current {
+                PowerMode::Normal => PowerMode::AlwaysOn,
+                PowerMode::AlwaysOn => PowerMode::Normal,
+            };
+            probe.set_power_mode(new_mode).await?;
+            self.log(LogLevel::Info, format!("Power mode set to {}", new_mode.name()));
         }
         Ok(())
     }
@@ -956,6 +1062,17 @@ fn render_probe_details(frame: &mut Frame, area: Rect, app: &App) {
             ),
         ]));
 
+        // Power mode
+        let power_mode = probe.power_mode().unwrap_or(PowerMode::Normal);
+        let power_style = match power_mode {
+            PowerMode::Normal => Style::default().fg(Color::Green),
+            PowerMode::AlwaysOn => Style::default().fg(Color::Yellow),
+        };
+        lines.push(Line::from(vec![
+            Span::raw("Power: "),
+            Span::styled(power_mode.name(), power_style),
+        ]));
+
         let conn_style = match probe.connection_state() {
             ConnectionState::Connected => Style::default().fg(Color::Green),
             ConnectionState::Connecting | ConnectionState::Disconnecting => {
@@ -994,44 +1111,51 @@ fn render_actions(frame: &mut Frame, area: Rect, app: &App) {
         .selected_probe()
         .is_some_and(|p| p.connection_state() == ConnectionState::Connected);
 
+    let conn_hint = if !connected {
+        Span::styled(" (connect first)", Style::default().fg(Color::DarkGray))
+    } else {
+        Span::raw("")
+    };
+
     let actions = vec![
         Line::from(vec![
             Span::styled("[Enter]", Style::default().fg(Color::Yellow)),
-            Span::raw(" Connect/Disconnect"),
-        ]),
-        Line::from(vec![
+            Span::raw(" Connect  "),
             Span::styled("[P]", Style::default().fg(Color::Yellow)),
-            Span::raw(" Set Prediction"),
-            if connected {
-                Span::raw("")
-            } else {
-                Span::styled(
-                    " (requires connection)",
-                    Style::default().fg(Color::DarkGray),
-                )
-            },
-        ]),
-        Line::from(vec![
+            Span::raw(" Predict  "),
             Span::styled("[C]", Style::default().fg(Color::Yellow)),
-            Span::raw(" Cancel Prediction  "),
-            Span::styled("[F]", Style::default().fg(Color::Yellow)),
-            Span::raw(" Food Safety"),
+            Span::raw(" Cancel"),
+            conn_hint.clone(),
         ]),
         Line::from(vec![
-            Span::styled("[I]", Style::default().fg(Color::Yellow)),
-            Span::raw(" Set ID  "),
-            Span::styled("[O]", Style::default().fg(Color::Yellow)),
-            Span::raw(" Cycle Color  "),
+            Span::styled("[F]", Style::default().fg(Color::Yellow)),
+            Span::raw(" Food Safe  "),
             Span::styled("[X]", Style::default().fg(Color::Yellow)),
-            Span::raw(" Reset Safe"),
+            Span::raw(" Reset Safe  "),
+            Span::styled("[I]", Style::default().fg(Color::Yellow)),
+            Span::raw(" ID  "),
+            Span::styled("[O]", Style::default().fg(Color::Yellow)),
+            Span::raw(" Color"),
+        ]),
+        Line::from(vec![
+            Span::styled("[A]", Style::default().fg(Color::Cyan)),
+            Span::raw(" Alarms  "),
+            Span::styled("[M]", Style::default().fg(Color::Cyan)),
+            Span::raw(" Silence  "),
+            Span::styled("[W]", Style::default().fg(Color::Cyan)),
+            Span::raw(" Power  "),
+            Span::styled("[R]", Style::default().fg(Color::Red)),
+            Span::raw(" Reset"),
         ]),
         Line::from(vec![
             Span::styled("[E]", Style::default().fg(Color::Yellow)),
-            Span::raw(" Export Logs  "),
+            Span::raw(" Export  "),
             Span::styled("[S]", Style::default().fg(Color::Yellow)),
-            Span::raw(" Toggle Scan  "),
+            Span::raw(" Scan  "),
             Span::styled("[U]", Style::default().fg(Color::Yellow)),
-            Span::raw(" Units"),
+            Span::raw(" Units  "),
+            Span::styled("[?]", Style::default().fg(Color::Yellow)),
+            Span::raw(" Help"),
         ]),
     ];
 
@@ -1372,10 +1496,10 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_dialog(frame: &mut Frame, dialog: &DialogState, area: Rect) {
     // Use larger dialog for FoodSafe
-    let dialog_area = if matches!(dialog.dialog_type, DialogType::SetFoodSafe) {
-        centered_rect(60, 60, area)
-    } else {
-        centered_rect(50, 40, area)
+    let dialog_area = match dialog.dialog_type {
+        DialogType::SetFoodSafe => centered_rect(60, 60, area),
+        DialogType::SetAlarm => centered_rect(55, 50, area),
+        _ => centered_rect(50, 40, area),
     };
 
     // Clear the area
@@ -1641,6 +1765,99 @@ fn render_dialog(frame: &mut Frame, dialog: &DialogState, area: Rect) {
             content.push(Line::from("[↑↓] Select  [Enter] Confirm  [Esc] Cancel"));
             (" Set Probe Color ", content)
         }
+        DialogType::SetAlarm => {
+            let alarm = &dialog.alarm;
+            let mut content = vec![];
+
+            let alarm_types = [
+                ("Core HIGH alarm", "Alert when core exceeds temperature"),
+                ("Core LOW alarm", "Alert when core drops below temperature"),
+                ("Surface HIGH alarm", "Alert when surface exceeds temperature"),
+                ("Ambient LOW alarm", "Alert when ambient drops below temperature"),
+                ("Disable ALL alarms", "Turn off all temperature alarms"),
+            ];
+
+            if alarm.stage == 0 {
+                // Select alarm type
+                content.push(Line::from(Span::styled(
+                    "Select Alarm Type:",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )));
+                content.push(Line::from(""));
+
+                for (i, (name, desc)) in alarm_types.iter().enumerate() {
+                    let is_selected = i == alarm.selected_alarm_type;
+                    let style = if is_selected {
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+                    let prefix = if is_selected { "> " } else { "  " };
+                    content.push(Line::from(Span::styled(
+                        format!("{}{}", prefix, name),
+                        style,
+                    )));
+                    content.push(Line::from(Span::styled(
+                        format!("    {}", desc),
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                }
+
+                content.push(Line::from(""));
+                content.push(Line::from("[↑↓] Select  [Enter] Next  [Esc] Cancel"));
+            } else {
+                // Enter temperature (for types 0-3)
+                let alarm_name = alarm_types[alarm.selected_alarm_type].0;
+                content.push(Line::from(Span::styled(
+                    format!("Configure: {}", alarm_name),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )));
+                content.push(Line::from(""));
+                content.push(Line::from("Enter temperature threshold (°C):"));
+                content.push(Line::from(""));
+                content.push(Line::from(Span::styled(
+                    format!("> {}_", alarm.temp_input),
+                    Style::default().fg(Color::Yellow),
+                )));
+                content.push(Line::from(""));
+                content.push(Line::from("Common values:"));
+                content.push(Line::from("  74°C (165°F) - Poultry safe"));
+                content.push(Line::from("  63°C (145°F) - Beef/Pork safe"));
+                content.push(Line::from("   4°C (40°F)  - Refrigeration"));
+                content.push(Line::from(""));
+                content.push(Line::from("[Enter] Confirm  [←] Back  [Esc] Cancel"));
+            }
+
+            (" Configure Temperature Alarm ", content)
+        }
+        DialogType::ConfirmReset => {
+            let content = vec![
+                Line::from(Span::styled(
+                    "⚠ WARNING: Reset Thermometer",
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from("This will reset the thermometer to factory defaults."),
+                Line::from(""),
+                Line::from("The following will be reset:"),
+                Line::from("  • Probe ID"),
+                Line::from("  • Probe color"),
+                Line::from("  • All temperature alarms"),
+                Line::from("  • Power mode settings"),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "This action cannot be undone!",
+                    Style::default().fg(Color::Yellow),
+                )),
+                Line::from(""),
+                Line::from("[Enter] Confirm Reset  [Esc] Cancel"),
+            ];
+            (" Confirm Reset ", content)
+        }
         DialogType::Help => {
             let content = vec![
                 Line::from("Keyboard Shortcuts:"),
@@ -1651,6 +1868,10 @@ fn render_dialog(frame: &mut Frame, dialog: &DialogState, area: Rect) {
                 Line::from("  C       Cancel prediction"),
                 Line::from("  F       Configure food safety"),
                 Line::from("  X       Reset food safety"),
+                Line::from("  A       Configure temperature alarms"),
+                Line::from("  M       Silence alarms"),
+                Line::from("  W       Toggle power mode"),
+                Line::from("  R       Reset thermometer"),
                 Line::from("  I       Set probe ID (1-8)"),
                 Line::from("  O       Set probe color"),
                 Line::from("  E       Export logs to CSV"),
@@ -1675,7 +1896,7 @@ fn render_dialog(frame: &mut Frame, dialog: &DialogState, area: Rect) {
 }
 
 fn render_help_overlay(frame: &mut Frame, area: Rect) {
-    let help_area = centered_rect(60, 70, area);
+    let help_area = centered_rect(60, 80, area);
 
     frame.render_widget(Clear, help_area);
 
@@ -1698,6 +1919,20 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
         Line::from("Food Safety:"),
         Line::from("  F          Configure food safety (select product)"),
         Line::from("  X          Reset food safety calculations"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Temperature Alarms:",
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from("  A          Configure temperature alarms"),
+        Line::from("  M          Silence currently sounding alarms"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Power & Reset:",
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from("  W          Toggle power mode (Normal/Always On)"),
+        Line::from("  R          Reset thermometer to factory defaults"),
         Line::from(""),
         Line::from("Probe Configuration:"),
         Line::from("  I          Set probe ID (1-8)"),
@@ -1805,6 +2040,19 @@ async fn run_app(terminal: &mut Terminal, mut app: App) -> Result<()> {
                                         // Final stage - confirm
                                         let _ = app.handle_dialog_confirm().await;
                                     }
+                                } else if matches!(dialog.dialog_type, DialogType::SetAlarm) {
+                                    if dialog.alarm.stage == 0 {
+                                        // If "Disable All" is selected, confirm immediately
+                                        if dialog.alarm.selected_alarm_type == 4 {
+                                            let _ = app.handle_dialog_confirm().await;
+                                        } else {
+                                            // Otherwise, go to temperature input stage
+                                            dialog.alarm.stage = 1;
+                                        }
+                                    } else {
+                                        // Confirm the alarm
+                                        let _ = app.handle_dialog_confirm().await;
+                                    }
                                 } else {
                                     let _ = app.handle_dialog_confirm().await;
                                 }
@@ -1815,18 +2063,44 @@ async fn run_app(terminal: &mut Terminal, mut app: App) -> Result<()> {
                                     if dialog.food_safe.stage > 0 {
                                         dialog.food_safe.stage -= 1;
                                     }
+                                } else if matches!(dialog.dialog_type, DialogType::SetAlarm) {
+                                    if dialog.alarm.stage > 0 {
+                                        dialog.alarm.stage -= 1;
+                                    }
                                 }
                             }
                             KeyCode::Char(c) => {
-                                dialog.input.push(c);
+                                if matches!(dialog.dialog_type, DialogType::SetAlarm)
+                                    && dialog.alarm.stage == 1
+                                {
+                                    // Alarm temp input
+                                    if c.is_ascii_digit() || c == '.' || c == '-' {
+                                        dialog.alarm.temp_input.push(c);
+                                    }
+                                } else {
+                                    dialog.input.push(c);
+                                }
                             }
                             KeyCode::Backspace => {
-                                dialog.input.pop();
+                                if matches!(dialog.dialog_type, DialogType::SetAlarm)
+                                    && dialog.alarm.stage == 1
+                                {
+                                    dialog.alarm.temp_input.pop();
+                                } else {
+                                    dialog.input.pop();
+                                }
                             }
                             KeyCode::Up => match dialog.dialog_type {
                                 DialogType::SetPrediction => {
                                     if dialog.selected_mode > 0 {
                                         dialog.selected_mode -= 1;
+                                    }
+                                }
+                                DialogType::SetAlarm => {
+                                    if dialog.alarm.stage == 0
+                                        && dialog.alarm.selected_alarm_type > 0
+                                    {
+                                        dialog.alarm.selected_alarm_type -= 1;
                                     }
                                 }
                                 DialogType::SetFoodSafe => {
@@ -1863,6 +2137,13 @@ async fn run_app(terminal: &mut Terminal, mut app: App) -> Result<()> {
                                 DialogType::SetPrediction => {
                                     if dialog.selected_mode < 1 {
                                         dialog.selected_mode += 1;
+                                    }
+                                }
+                                DialogType::SetAlarm => {
+                                    if dialog.alarm.stage == 0
+                                        && dialog.alarm.selected_alarm_type < 4
+                                    {
+                                        dialog.alarm.selected_alarm_type += 1;
                                     }
                                 }
                                 DialogType::SetFoodSafe => {
@@ -1956,6 +2237,18 @@ async fn run_app(terminal: &mut Terminal, mut app: App) -> Result<()> {
                         }
                         KeyCode::Char('e') | KeyCode::Char('E') => {
                             app.export_logs();
+                        }
+                        KeyCode::Char('a') | KeyCode::Char('A') => {
+                            app.open_dialog(DialogType::SetAlarm);
+                        }
+                        KeyCode::Char('m') | KeyCode::Char('M') => {
+                            let _ = app.silence_alarms().await;
+                        }
+                        KeyCode::Char('w') | KeyCode::Char('W') => {
+                            let _ = app.toggle_power_mode().await;
+                        }
+                        KeyCode::Char('r') | KeyCode::Char('R') => {
+                            app.open_dialog(DialogType::ConfirmReset);
                         }
                         _ => {}
                     }

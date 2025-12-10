@@ -59,6 +59,26 @@ pub enum UartMessageType {
     /// Reset food safety response.
     ResetFoodSafeResponse = 0x88,
 
+    /// Set power mode request (0x09).
+    SetPowerMode = 0x09,
+    /// Set power mode response.
+    SetPowerModeResponse = 0x89,
+
+    /// Reset thermometer request (0x0A).
+    ResetThermometer = 0x0A,
+    /// Reset thermometer response.
+    ResetThermometerResponse = 0x8A,
+
+    /// Set high/low alarms request (0x0B).
+    SetHighLowAlarms = 0x0B,
+    /// Set high/low alarms response.
+    SetHighLowAlarmsResponse = 0x8B,
+
+    /// Silence alarms request (0x0C).
+    SilenceAlarms = 0x0C,
+    /// Silence alarms response.
+    SilenceAlarmsResponse = 0x8C,
+
     /// Unknown message type.
     Unknown = 0xFF,
 }
@@ -86,6 +106,14 @@ impl UartMessageType {
             0x87 => Self::ConfigureFoodSafeResponse,
             0x08 => Self::ResetFoodSafe,
             0x88 => Self::ResetFoodSafeResponse,
+            0x09 => Self::SetPowerMode,
+            0x89 => Self::SetPowerModeResponse,
+            0x0A => Self::ResetThermometer,
+            0x8A => Self::ResetThermometerResponse,
+            0x0B => Self::SetHighLowAlarms,
+            0x8B => Self::SetHighLowAlarmsResponse,
+            0x0C => Self::SilenceAlarms,
+            0x8C => Self::SilenceAlarmsResponse,
             _ => Self::Unknown,
         }
     }
@@ -355,6 +383,38 @@ pub fn build_read_over_temperature_request() -> UartMessage {
     UartMessage::new(UartMessageType::ReadOverTemperature, vec![])
 }
 
+/// Build a Set Power Mode request.
+///
+/// # Arguments
+/// * `power_mode` - Power mode: 0 = Normal (auto power-off in charger), 1 = Always On
+pub fn build_set_power_mode_request(power_mode: u8) -> UartMessage {
+    UartMessage::new(UartMessageType::SetPowerMode, vec![power_mode & 0x03])
+}
+
+/// Build a Reset Thermometer request.
+///
+/// This resets the thermometer to factory defaults.
+pub fn build_reset_thermometer_request() -> UartMessage {
+    UartMessage::new(UartMessageType::ResetThermometer, vec![])
+}
+
+/// Build a Set High/Low Alarms request.
+///
+/// # Arguments
+/// * `alarm_config` - 44-byte alarm configuration (22 bytes high + 22 bytes low)
+///
+/// See `AlarmConfig::to_bytes()` for the format.
+pub fn build_set_high_low_alarms_request(alarm_config: &[u8; 44]) -> UartMessage {
+    UartMessage::new(UartMessageType::SetHighLowAlarms, alarm_config.to_vec())
+}
+
+/// Build a Silence Alarms request.
+///
+/// Silences any currently sounding alarms.
+pub fn build_silence_alarms_request() -> UartMessage {
+    UartMessage::new(UartMessageType::SilenceAlarms, vec![])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,5 +527,70 @@ mod tests {
         let msg = build_set_probe_id_request(3);
         assert_eq!(msg.message_type(), UartMessageType::SetProbeId);
         assert_eq!(msg.payload[0], 2); // 0-indexed
+    }
+
+    #[test]
+    fn test_new_message_types() {
+        // Test SetPowerMode
+        assert_eq!(UartMessageType::from_raw(0x09), UartMessageType::SetPowerMode);
+        assert_eq!(
+            UartMessageType::from_raw(0x89),
+            UartMessageType::SetPowerModeResponse
+        );
+
+        // Test ResetThermometer
+        assert_eq!(
+            UartMessageType::from_raw(0x0A),
+            UartMessageType::ResetThermometer
+        );
+        assert_eq!(
+            UartMessageType::from_raw(0x8A),
+            UartMessageType::ResetThermometerResponse
+        );
+
+        // Test SetHighLowAlarms
+        assert_eq!(
+            UartMessageType::from_raw(0x0B),
+            UartMessageType::SetHighLowAlarms
+        );
+        assert_eq!(
+            UartMessageType::from_raw(0x8B),
+            UartMessageType::SetHighLowAlarmsResponse
+        );
+
+        // Test SilenceAlarms
+        assert_eq!(
+            UartMessageType::from_raw(0x0C),
+            UartMessageType::SilenceAlarms
+        );
+        assert_eq!(
+            UartMessageType::from_raw(0x8C),
+            UartMessageType::SilenceAlarmsResponse
+        );
+    }
+
+    #[test]
+    fn test_build_new_requests() {
+        // Test SetPowerMode
+        let msg = build_set_power_mode_request(1);
+        assert_eq!(msg.message_type(), UartMessageType::SetPowerMode);
+        assert_eq!(msg.payload.len(), 1);
+        assert_eq!(msg.payload[0], 1);
+
+        // Test ResetThermometer
+        let msg = build_reset_thermometer_request();
+        assert_eq!(msg.message_type(), UartMessageType::ResetThermometer);
+        assert!(msg.payload.is_empty());
+
+        // Test SetHighLowAlarms
+        let alarm_config = [0u8; 44];
+        let msg = build_set_high_low_alarms_request(&alarm_config);
+        assert_eq!(msg.message_type(), UartMessageType::SetHighLowAlarms);
+        assert_eq!(msg.payload.len(), 44);
+
+        // Test SilenceAlarms
+        let msg = build_silence_alarms_request();
+        assert_eq!(msg.message_type(), UartMessageType::SilenceAlarms);
+        assert!(msg.payload.is_empty());
     }
 }

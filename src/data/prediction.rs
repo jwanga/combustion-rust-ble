@@ -4,6 +4,8 @@
 //! which estimates when food will reach target temperatures.
 
 /// The current state of the prediction engine.
+///
+/// 4-bit enumeration (values 0-15) per the BLE specification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
@@ -19,18 +21,37 @@ pub enum PredictionState {
     Predicting = 3,
     /// Prediction complete - remove from heat.
     RemovalPredictionDone = 4,
-    /// Reserved for future use.
+    /// Reserved for future use (state 5).
     ReservedState5 = 5,
-    /// Reserved for future use.
+    /// Reserved for future use (state 6).
     ReservedState6 = 6,
-    /// Unknown state.
-    Unknown = 7,
+    /// Reserved for future use (state 7).
+    ReservedState7 = 7,
+    /// Reserved for future use (state 8).
+    ReservedState8 = 8,
+    /// Reserved for future use (state 9).
+    ReservedState9 = 9,
+    /// Reserved for future use (state 10).
+    ReservedState10 = 10,
+    /// Reserved for future use (state 11).
+    ReservedState11 = 11,
+    /// Reserved for future use (state 12).
+    ReservedState12 = 12,
+    /// Reserved for future use (state 13).
+    ReservedState13 = 13,
+    /// Reserved for future use (state 14).
+    ReservedState14 = 14,
+    /// Unknown state (15 per BLE specification).
+    Unknown = 15,
 }
 
 impl PredictionState {
     /// Create a PredictionState from a raw byte value.
+    ///
+    /// Per the BLE specification, this is a 4-bit value (0-15).
+    /// Value 15 is explicitly defined as "Unknown".
     pub fn from_raw(value: u8) -> Self {
-        match value {
+        match value & 0x0F {
             0 => Self::ProbeNotInserted,
             1 => Self::ProbeInserted,
             2 => Self::Warming,
@@ -38,7 +59,15 @@ impl PredictionState {
             4 => Self::RemovalPredictionDone,
             5 => Self::ReservedState5,
             6 => Self::ReservedState6,
-            _ => Self::Unknown,
+            7 => Self::ReservedState7,
+            8 => Self::ReservedState8,
+            9 => Self::ReservedState9,
+            10 => Self::ReservedState10,
+            11 => Self::ReservedState11,
+            12 => Self::ReservedState12,
+            13 => Self::ReservedState13,
+            14 => Self::ReservedState14,
+            15 | _ => Self::Unknown,
         }
     }
 
@@ -225,7 +254,13 @@ mod tests {
             PredictionState::from_raw(4),
             PredictionState::RemovalPredictionDone
         );
+        // Per spec, value 15 is explicitly "Unknown"
+        assert_eq!(PredictionState::from_raw(15), PredictionState::Unknown);
+        // Values outside 0-15 should also map to Unknown (masked to 4 bits)
         assert_eq!(PredictionState::from_raw(255), PredictionState::Unknown);
+        // Test reserved states
+        assert_eq!(PredictionState::from_raw(5), PredictionState::ReservedState5);
+        assert_eq!(PredictionState::from_raw(14), PredictionState::ReservedState14);
     }
 
     #[test]

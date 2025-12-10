@@ -91,11 +91,11 @@ pub use utils::{celsius_to_fahrenheit, fahrenheit_to_celsius};
 pub use ble::advertising::{BatteryStatus, Overheating, ProbeColor, ProbeId, ProbeMode};
 pub use ble::connection::ConnectionState;
 pub use data::{
-    FoodSafeConfig, FoodSafeData, FoodSafeMode, FoodSafeProduct, FoodSafeServingState,
-    FoodSafeState, FoodSafeStatus, IntegratedProduct, LoggedDataPoint, PredictionInfo,
-    PredictionLog, PredictionMode, PredictionState, PredictionType, ProbeTemperatures,
-    RawTemperature, Serving, SessionInfo, SimplifiedProduct, TemperatureLog, VirtualSensorSelection,
-    VirtualTemperatures,
+    AlarmConfig, AlarmStatus, FoodSafeConfig, FoodSafeData, FoodSafeMode, FoodSafeProduct,
+    FoodSafeServingState, FoodSafeState, FoodSafeStatus, IntegratedProduct, LoggedDataPoint,
+    PowerMode, PredictionInfo, PredictionLog, PredictionMode, PredictionState, PredictionType,
+    ProbeTemperatures, RawTemperature, Serving, SessionInfo, SimplifiedProduct, TemperatureLog,
+    ThermometerPreferences, VirtualSensorSelection, VirtualTemperatures,
 };
 
 #[cfg(test)]

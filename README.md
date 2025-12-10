@@ -14,6 +14,8 @@ A cross-platform Rust library for communicating with [Combustion Inc's](https://
 - **Temperature Logging**: Download complete temperature history
 - **Prediction Engine**: Set target temperatures and get time-to-removal predictions
 - **Food Safety**: SafeCook/USDA Safe compliance monitoring
+- **Temperature Alarms**: High/low temperature alarms for all sensors with audible alerts
+- **Power Mode Control**: Configure auto power-off behavior
 - **Multi-probe Support**: Manage up to 8 probes simultaneously
 - **MeatNet Support**: Optional mesh networking between probes
 
@@ -79,6 +81,7 @@ Run the examples with `cargo run --example <name>`:
 | `log_download` | Download complete temperature history from probe |
 | `multi_probe` | Manage multiple probes simultaneously |
 | `food_safety` | SafeCook feature demonstration |
+| `alarm_control` | Temperature alarm and power mode control |
 | `probe_dashboard` | Full-featured TUI dashboard with ratatui |
 | `probe_debug` | Debug tool for BLE communication and data parsing |
 
@@ -342,6 +345,72 @@ probe.on_log_sync_progress(|percent| {
 });
 ```
 
+#### Temperature Alarms
+
+```rust
+use combustion_rust_ble::AlarmConfig;
+
+// Set a high temperature alarm for the core (virtual) sensor
+probe.set_core_high_alarm(74.0).await?;  // 74°C (165°F) - poultry safe temp
+
+// Set a low temperature alarm for the core sensor
+probe.set_core_low_alarm(4.0).await?;  // 4°C (40°F) - refrigeration temp
+
+// Configure multiple alarms with full control
+let mut config = AlarmConfig::new();
+config.set_core_high_alarm(63.0, true);      // Beef/pork safe temp
+config.set_surface_high_alarm(200.0, true);  // Grill surface alert
+config.set_ambient_low_alarm(0.0, true);     // Freezing warning
+probe.set_alarms(&config).await?;
+
+// Check alarm status
+if probe.any_alarm_alarming() {
+    println!("Alarm is sounding!");
+    probe.silence_alarms().await?;
+}
+
+if probe.any_alarm_tripped() {
+    println!("An alarm threshold was crossed");
+}
+
+// Get detailed alarm configuration
+if let Some(config) = probe.alarm_config() {
+    let core_high = config.core_high_alarm();
+    if core_high.is_enabled() {
+        println!("Core high alarm set to: {:.1}°C", core_high.temperature);
+    }
+}
+
+// Disable all alarms
+probe.disable_all_alarms().await?;
+```
+
+#### Power Mode
+
+```rust
+use combustion_rust_ble::PowerMode;
+
+// Check current power mode
+if let Some(mode) = probe.power_mode() {
+    println!("Power mode: {}", mode.name());
+}
+
+// Set power mode to Always On (probe stays powered in charger)
+probe.set_power_mode(PowerMode::AlwaysOn).await?;
+
+// Set power mode to Normal (auto power-off in charger)
+probe.set_power_mode(PowerMode::Normal).await?;
+
+// Check if probe is in always-on mode
+if probe.is_always_on() {
+    println!("Probe will stay powered in charger");
+}
+
+// Reset thermometer to factory defaults
+// WARNING: Resets probe ID, color, alarms, etc.
+probe.reset_thermometer().await?;
+```
+
 #### Probe Configuration
 
 ```rust
@@ -406,6 +475,17 @@ use combustion_rust_ble::{
     PredictionType,      // None, Removal, Resting, Reserved
     FoodSafeProduct,     // ChickenBreast, GroundBeef, BeefSteak, PorkChop, Salmon, Custom(...)
     FoodSafeServingState, // SafeToServe, NotSafe
+    PowerMode,           // Normal, AlwaysOn
+};
+```
+
+### Structs
+
+```rust
+use combustion_rust_ble::{
+    AlarmConfig,              // High/low alarm configuration for all sensors
+    AlarmStatus,              // Individual alarm status (set, tripped, alarming, temperature)
+    ThermometerPreferences,   // Power mode and other thermometer settings
 };
 ```
 
