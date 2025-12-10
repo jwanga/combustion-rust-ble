@@ -4,7 +4,7 @@ A cross-platform Rust library for communicating with [Combustion Inc's](https://
 
 [![Crates.io](https://img.shields.io/crates/v/combustion-rust-ble.svg)](https://crates.io/crates/combustion-rust-ble)
 [![Documentation](https://docs.rs/combustion-rust-ble/badge.svg)](https://docs.rs/combustion-rust-ble)
-[![License](https://img.shields.io/crates/l/combustion-rust-ble.svg)](LICENSE-MIT)
+[![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](UNLICENSE)
 
 ## Features
 
@@ -501,12 +501,7 @@ Full API documentation is available at [docs.rs](https://docs.rs/combustion-rust
 
 ## License
 
-Licensed under either of:
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-
-at your option.
+This project is released into the public domain under the [Unlicense](UNLICENSE).
 
 ## Contributing
 
