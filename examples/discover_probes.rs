@@ -21,12 +21,13 @@ async fn main() -> Result<()> {
     let manager = DeviceManager::new().await?;
 
     // Register callback for discovered probes
-    let _handle = manager.on_probe_discovered(|probe| {
+    let _handle = manager.on_probe_discovered(|event| {
+        let probe = &event.probe;
         println!("\nDiscovered probe:");
         println!("  Serial: {}", probe.serial_number_string());
         println!("  ID: {}", probe.id());
         println!("  Color: {:?}", probe.color());
-        println!("  RSSI: {:?} dBm", probe.rssi());
+        println!("  RSSI: {:?} dBm", event.rssi);
         println!("  Battery: {:?}", probe.battery_status());
         println!("  Mode: {:?}", probe.mode());
 

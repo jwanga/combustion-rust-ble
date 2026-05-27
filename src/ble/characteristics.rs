@@ -10,11 +10,21 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
 use crate::ble::uuids::*;
 use crate::error::{Error, Result};
+
+/// Substrings that, when present in a btleplug error message, indicate the underlying
+/// D-Bus / GATT object was deleted between cache and use — i.e. the peripheral
+/// disconnected mid-setup and the cached handles are stale.
+const STALE_DBUS_MARKERS: &[&str] = &["doesn't exist", "UnknownObject", "No such interface"];
+
+fn is_stale_dbus_error(err: &btleplug::Error) -> bool {
+    let msg = err.to_string();
+    STALE_DBUS_MARKERS.iter().any(|m| msg.contains(m))
+}
 
 /// Notification event from a characteristic.
 #[derive(Debug, Clone)]
@@ -57,8 +67,23 @@ impl CharacteristicHandler {
 
     /// Discover and cache all characteristics.
     ///
-    /// This should be called after connecting and discovering services.
+    /// This refreshes the BlueZ service cache and rebuilds the local characteristic map.
+    /// Returns `Err(Error::ConnectionFailed)` if no characteristics are found or the
+    /// required Combustion UUIDs (UART TX and Probe Status) are missing — both situations
+    /// indicate services have not yet been resolved or the device disconnected mid-setup.
     pub async fn discover_characteristics(&self) -> Result<()> {
+        let start = std::time::Instant::now();
+
+        // Don't trust btleplug's cache — some peripherals report stale entries after a
+        // disconnect-during-setup. Re-run discovery so the local snapshot reflects the
+        // current GATT tree.
+        self.peripheral
+            .discover_services()
+            .await
+            .map_err(|e| Error::ConnectionFailed {
+                reason: format!("Service discovery failed: {e}"),
+            })?;
+
         let services = self.peripheral.services();
 
         let mut chars = self.characteristics.write();
@@ -74,7 +99,27 @@ impl CharacteristicHandler {
             }
         }
 
-        debug!("Discovered {} characteristics", chars.len());
+        let count = chars.len();
+        let has_uart = chars.contains_key(&UART_TX_UUID);
+        let has_status = chars.contains_key(&PROBE_STATUS_CHARACTERISTIC_UUID);
+
+        info!(
+            step = "characteristics_cached",
+            count = count,
+            has_uart = has_uart,
+            has_probe_status = has_status,
+            duration_ms = start.elapsed().as_millis() as u64,
+            "Cached GATT characteristics",
+        );
+
+        if count == 0 || !has_uart || !has_status {
+            return Err(Error::ConnectionFailed {
+                reason: format!(
+                    "services not yet resolved or required characteristics missing \
+                     (count={count}, has_uart={has_uart}, has_probe_status={has_status})"
+                ),
+            });
+        }
 
         Ok(())
     }
@@ -139,6 +184,12 @@ impl CharacteristicHandler {
     }
 
     /// Subscribe to notifications from a characteristic.
+    ///
+    /// If the underlying BLE stack reports a stale GATT object (D-Bus
+    /// `UnknownObject` / `No such interface` / `doesn't exist`), the local characteristic
+    /// cache is cleared and `Error::DeviceDisconnectedDuringSetup` is returned. Callers
+    /// should treat that variant as "fully disconnect + reconnect from scratch", not as
+    /// a retry-with-same-handle.
     pub async fn subscribe(&self, uuid: &Uuid) -> Result<()> {
         debug!("Attempting to subscribe to characteristic: {}", uuid);
 
@@ -167,17 +218,35 @@ impl CharacteristicHandler {
             uuid, characteristic.properties
         );
 
-        self.peripheral
-            .subscribe(&characteristic)
-            .await
-            .map_err(|e| {
-                debug!("Failed to subscribe to {}: {:?}", uuid, e);
-                Error::Bluetooth(e)
-            })?;
-
-        debug!("Successfully subscribed to notifications from {}", uuid);
-
-        Ok(())
+        match self.peripheral.subscribe(&characteristic).await {
+            Ok(()) => {
+                info!(
+                    step = "subscribed",
+                    uuid = %uuid,
+                    "Subscribed to notifications",
+                );
+                Ok(())
+            }
+            Err(e) => {
+                if is_stale_dbus_error(&e) {
+                    warn!(
+                        uuid = %uuid,
+                        error = %e,
+                        "Stale GATT object on subscribe — peripheral disconnected during setup",
+                    );
+                    // The whole cache is suspect — every cached path may have been freed
+                    // by BlueZ on the disconnect. Clear it so a subsequent reconnect
+                    // forces a fresh discovery.
+                    self.characteristics.write().clear();
+                    Err(Error::DeviceDisconnectedDuringSetup {
+                        context: format!("subscribe to {uuid} failed: {e}"),
+                    })
+                } else {
+                    debug!("Failed to subscribe to {}: {:?}", uuid, e);
+                    Err(Error::Bluetooth(e))
+                }
+            }
+        }
     }
 
     /// Unsubscribe from notifications from a characteristic.

@@ -7,8 +7,8 @@ use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::broadcast;
-use tracing::info;
+use tokio::sync::{broadcast, Semaphore};
+use tracing::{info, warn};
 
 use crate::ble::advertising::{
     AdvertisingData, BatteryStatus, Overheating, ProbeColor, ProbeId, ProbeMode,
@@ -174,7 +174,16 @@ impl Probe {
     pub const DEFAULT_STALE_TIMEOUT: Duration = Duration::from_secs(15);
 
     /// Create a new probe instance.
-    pub(crate) fn new(identifier: String, peripheral: Peripheral, serial_number: u32) -> Self {
+    ///
+    /// `connect_permit` is the adapter-level connect semaphore shared with every other
+    /// `Probe` managed by the same `DeviceManager`. See
+    /// [`ConnectionManager::new`] for details.
+    pub(crate) fn new(
+        identifier: String,
+        peripheral: Peripheral,
+        serial_number: u32,
+        connect_permit: Arc<Semaphore>,
+    ) -> Self {
         let (temperature_tx, _) = broadcast::channel(64);
         let (prediction_tx, _) = broadcast::channel(16);
         let (log_sync_tx, _) = broadcast::channel(16);
@@ -182,7 +191,7 @@ impl Probe {
         Self {
             identifier,
             state: Arc::new(RwLock::new(ProbeState::new(serial_number))),
-            connection: Arc::new(ConnectionManager::new(peripheral)),
+            connection: Arc::new(ConnectionManager::new(peripheral, connect_permit)),
             characteristics: Arc::new(RwLock::new(None)),
             is_stale: Arc::new(AtomicBool::new(false)),
             temperature_tx,
@@ -326,39 +335,86 @@ impl Probe {
 
     /// Attempt to connect to the probe.
     pub async fn connect(&self) -> Result<()> {
-        info!("Connecting to probe {}", self.serial_number_string());
+        let serial = self.serial_number_string();
+        let connect_start = std::time::Instant::now();
+        info!(serial = %serial, "Connecting to probe");
 
         self.connection.connect(true).await?;
 
-        info!("Connected to probe {}", self.serial_number_string());
+        // From here the BlueZ link is up. Any failure in GATT setup must roll back
+        // the link so internal state stays honest with BlueZ — otherwise the next
+        // `Probe::connect()` would see `ConnectionState::Connected` AND `peripheral`
+        // alive, short-circuit through the LIB-7 defensive check, and skip GATT setup
+        // entirely — leaving the caller with a "connected" probe that never emits
+        // notifications.
+        match self.complete_gatt_setup(&serial, connect_start).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                warn!(
+                    serial = %serial,
+                    error = %e,
+                    "Post-link setup failed; disconnecting cleanly to roll back internal state",
+                );
+                let _ = self.connection.disconnect().await;
+                *self.characteristics.write() = None;
+                Err(e)
+            }
+        }
+    }
 
-        // Set up characteristics handler
+    /// GATT discovery + subscribe + notification listener setup. Split out so
+    /// `connect()` can run a single error-handling branch for any post-link failure
+    /// and disconnect cleanly.
+    async fn complete_gatt_setup(
+        &self,
+        serial: &str,
+        connect_start: std::time::Instant,
+    ) -> Result<()> {
+        // Set up characteristics handler. discover_characteristics validates the GATT
+        // tree (services resolved, required UUIDs present) and returns a clear error if
+        // the peripheral disconnected during setup.
         let handler = CharacteristicHandler::new(self.connection.peripheral().clone());
         handler.discover_characteristics().await?;
 
-        // Subscribe to UART notifications
-        if handler.has_characteristic(&UART_TX_UUID) {
-            handler.subscribe(&UART_TX_UUID).await?;
-        }
-
-        // Subscribe to Probe Status notifications for prediction data
+        // Subscribe to UART notifications. UART_TX is mandatory — discover_characteristics
+        // would have already returned Err if it were missing.
+        let uart_start = std::time::Instant::now();
+        handler.subscribe(&UART_TX_UUID).await?;
         info!(
-            "Checking for Probe Status characteristic: {}",
-            PROBE_STATUS_CHARACTERISTIC_UUID
+            serial = %serial,
+            step = "subscribed_uart",
+            duration_ms = uart_start.elapsed().as_millis() as u64,
+            "Subscribed to UART TX",
         );
-        if handler.has_characteristic(&PROBE_STATUS_CHARACTERISTIC_UUID) {
-            handler.subscribe(&PROBE_STATUS_CHARACTERISTIC_UUID).await?;
-            info!("Subscribed to Probe Status characteristic - prediction data will be available");
-        } else {
-            info!("Probe Status characteristic NOT found - prediction data will not be available");
-        }
+
+        // Subscribe to Probe Status notifications for prediction data.
+        let status_start = std::time::Instant::now();
+        handler.subscribe(&PROBE_STATUS_CHARACTERISTIC_UUID).await?;
+        info!(
+            serial = %serial,
+            step = "subscribed_status",
+            duration_ms = status_start.elapsed().as_millis() as u64,
+            "Subscribed to Probe Status",
+        );
 
         handler.start_notifications().await?;
+        info!(
+            serial = %serial,
+            step = "notifications_started",
+            "Notification listener started",
+        );
 
         // Start processing status notifications
         self.start_status_notification_handler(&handler);
 
         *self.characteristics.write() = Some(handler);
+
+        info!(
+            serial = %serial,
+            step = "connected",
+            duration_ms = connect_start.elapsed().as_millis() as u64,
+            "Probe fully connected and streaming",
+        );
 
         Ok(())
     }
@@ -505,6 +561,25 @@ impl Probe {
         *self.characteristics.write() = None;
 
         Ok(())
+    }
+
+    /// Handle an out-of-band notification that the link layer dropped (typically
+    /// `CentralEvent::DeviceDisconnected` routed from the scanner).
+    ///
+    /// Resets the underlying [`ConnectionManager`] to `Disconnected` so the next
+    /// [`Probe::connect`] call goes through the full connect+resolve path instead of
+    /// being short-circuited by stale internal state. Also clears the cached
+    /// [`CharacteristicHandler`] — its GATT D-Bus paths are gone with the link, and
+    /// a fresh handler will be created on the next connect.
+    ///
+    /// Does NOT auto-reconnect. Callers manage reconnect policy.
+    pub async fn handle_link_disconnect(&self) {
+        info!(
+            serial = %self.serial_number_string(),
+            "Handling link-layer disconnect",
+        );
+        self.connection.reset_to_disconnected();
+        *self.characteristics.write() = None;
     }
 
     /// Check if we're maintaining a connection.
