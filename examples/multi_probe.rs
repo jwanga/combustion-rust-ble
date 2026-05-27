@@ -22,14 +22,16 @@ async fn main() -> Result<()> {
     let probes_found = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let probes_found_clone = probes_found.clone();
 
-    let _handle = manager.on_probe_discovered(move |probe| {
+    let _handle = manager.on_probe_discovered(move |event| {
         let count = probes_found_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        let probe = &event.probe;
         println!(
-            "Found probe #{}: {} (ID: {}, Color: {:?})",
+            "Found probe #{}: {} (ID: {}, Color: {:?}, RSSI: {:?} dBm)",
             count,
             probe.serial_number_string(),
             probe.id(),
-            probe.color()
+            probe.color(),
+            event.rssi,
         );
     });
 

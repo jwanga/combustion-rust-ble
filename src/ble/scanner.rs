@@ -3,7 +3,7 @@
 //! Provides the scanner for discovering Combustion probes.
 
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
-use btleplug::platform::{Adapter, Manager, Peripheral};
+use btleplug::platform::{Adapter, Manager, Peripheral, PeripheralId};
 use futures::stream::StreamExt;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -39,6 +39,9 @@ pub struct BleScanner {
     discovered: Arc<RwLock<HashMap<String, ProbeDiscoveryEvent>>>,
     /// Channel for discovery events.
     event_tx: broadcast::Sender<ProbeDiscoveryEvent>,
+    /// Channel for link-layer disconnect events (`CentralEvent::DeviceDisconnected`).
+    /// Carries the `PeripheralId` so subscribers can look up the affected probe.
+    disconnect_tx: broadcast::Sender<PeripheralId>,
     /// Handle to the scanning task.
     scan_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 }
@@ -67,12 +70,14 @@ impl BleScanner {
         );
 
         let (event_tx, _) = broadcast::channel(100);
+        let (disconnect_tx, _) = broadcast::channel(32);
 
         Ok(Self {
             adapter,
             is_scanning: Arc::new(RwLock::new(false)),
             discovered: Arc::new(RwLock::new(HashMap::new())),
             event_tx,
+            disconnect_tx,
             scan_handle: Arc::new(RwLock::new(None)),
         })
     }
@@ -80,12 +85,14 @@ impl BleScanner {
     /// Create a new BLE scanner with a specific adapter.
     pub fn with_adapter(adapter: Adapter) -> Self {
         let (event_tx, _) = broadcast::channel(100);
+        let (disconnect_tx, _) = broadcast::channel(32);
 
         Self {
             adapter,
             is_scanning: Arc::new(RwLock::new(false)),
             discovered: Arc::new(RwLock::new(HashMap::new())),
             event_tx,
+            disconnect_tx,
             scan_handle: Arc::new(RwLock::new(None)),
         }
     }
@@ -116,6 +123,7 @@ impl BleScanner {
         let is_scanning = self.is_scanning.clone();
         let discovered = self.discovered.clone();
         let event_tx = self.event_tx.clone();
+        let disconnect_tx = self.disconnect_tx.clone();
 
         let handle = tokio::spawn(async move {
             let mut events = match adapter.events().await {
@@ -134,6 +142,7 @@ impl BleScanner {
                             &adapter,
                             &discovered,
                             &event_tx,
+                            &disconnect_tx,
                         ).await;
                     }
                     _ = tokio::time::sleep(Duration::from_millis(100)) => {
@@ -189,6 +198,16 @@ impl BleScanner {
         self.event_tx.subscribe()
     }
 
+    /// Subscribe to link-layer disconnect events.
+    ///
+    /// Each event carries the `PeripheralId` of the device BlueZ (or the platform
+    /// equivalent) just told us went offline. Use this to keep higher-level
+    /// connection state honest — without this signal, a stale `Connected` state
+    /// will short-circuit subsequent reconnect attempts.
+    pub fn subscribe_disconnects(&self) -> broadcast::Receiver<PeripheralId> {
+        self.disconnect_tx.subscribe()
+    }
+
     /// Get the underlying adapter.
     pub fn adapter(&self) -> &Adapter {
         &self.adapter
@@ -200,6 +219,7 @@ impl BleScanner {
         adapter: &Adapter,
         discovered: &Arc<RwLock<HashMap<String, ProbeDiscoveryEvent>>>,
         event_tx: &broadcast::Sender<ProbeDiscoveryEvent>,
+        disconnect_tx: &broadcast::Sender<PeripheralId>,
     ) {
         use btleplug::api::CentralEvent;
 
@@ -217,6 +237,10 @@ impl BleScanner {
             }
             CentralEvent::DeviceDisconnected(id) => {
                 debug!("Device disconnected: {:?}", id);
+                // Route to subscribers so connection-state trackers can stay honest.
+                // No receivers is fine — broadcast::send returns Err in that case and we
+                // ignore it.
+                let _ = disconnect_tx.send(id);
             }
             CentralEvent::ManufacturerDataAdvertisement {
                 id,

@@ -35,6 +35,15 @@ pub enum Error {
     #[error("Connection lost")]
     ConnectionLost,
 
+    /// The peripheral disconnected during connection setup (e.g. between service discovery
+    /// and characteristic subscription). Cached GATT handles are stale and must be rebuilt
+    /// by a full disconnect + reconnect.
+    #[error("Device disconnected during setup: {context}")]
+    DeviceDisconnectedDuringSetup {
+        /// Description of which setup step detected the stale connection.
+        context: String,
+    },
+
     /// Invalid data was received from the probe.
     #[error("Invalid data received: {context}")]
     InvalidData {

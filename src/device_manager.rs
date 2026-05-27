@@ -5,12 +5,13 @@
 //! and managed. Other Combustion devices (Display, Booster, MeatNet Repeater,
 //! Giant Grill Gauge) are intentionally filtered out.
 
+use btleplug::platform::PeripheralId;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Semaphore};
 use tracing::{debug, info, warn};
 
 use crate::ble::scanner::{BleScanner, ProbeDiscoveryEvent};
@@ -27,6 +28,20 @@ pub struct ProbeEvent {
     pub identifier: String,
 }
 
+/// A probe-discovery broadcast payload.
+///
+/// Carries the latest RSSI reading from the advertising packet that triggered the
+/// discovery event, so consumers can log signal strength without having to read it back
+/// from the probe's cached state (which is updated in the same tick but is otherwise
+/// rate-dependent).
+#[derive(Debug, Clone)]
+pub struct DiscoveredProbeEvent {
+    /// The probe that was discovered or updated.
+    pub probe: Arc<Probe>,
+    /// RSSI from the advertising packet, in dBm, if reported by the OS.
+    pub rssi: Option<i16>,
+}
+
 /// Central manager for discovering and managing Combustion probes.
 pub struct DeviceManager {
     /// BLE scanner.
@@ -36,9 +51,16 @@ pub struct DeviceManager {
     /// Whether MeatNet is enabled.
     meatnet_enabled: AtomicBool,
     /// Probe discovery channel.
-    probe_discovered_tx: broadcast::Sender<Arc<Probe>>,
+    probe_discovered_tx: broadcast::Sender<DiscoveredProbeEvent>,
     /// Probe stale channel.
     probe_stale_tx: broadcast::Sender<Arc<Probe>>,
+    /// Probe link-layer-disconnect channel — fires when the platform tells us a probe
+    /// went offline (`CentralEvent::DeviceDisconnected`).
+    probe_disconnected_tx: broadcast::Sender<Arc<Probe>>,
+    /// Adapter-level semaphore (permits=1) shared with every `Probe`'s
+    /// `ConnectionManager` so that BlueZ `Connect()` calls are serialized. See
+    /// `ConnectionManager::connect_permit` for the rationale.
+    connect_permit: Arc<Semaphore>,
     /// Callback ID counter.
     callback_counter: AtomicU64,
     /// Background task handle.
@@ -58,6 +80,7 @@ impl DeviceManager {
 
         let (probe_discovered_tx, _) = broadcast::channel(32);
         let (probe_stale_tx, _) = broadcast::channel(32);
+        let (probe_disconnected_tx, _) = broadcast::channel(32);
 
         Ok(Self {
             scanner: Arc::new(scanner),
@@ -65,6 +88,8 @@ impl DeviceManager {
             meatnet_enabled: AtomicBool::new(false),
             probe_discovered_tx,
             probe_stale_tx,
+            probe_disconnected_tx,
+            connect_permit: Arc::new(Semaphore::new(1)),
             callback_counter: AtomicU64::new(0),
             background_handle: RwLock::new(None),
             is_running: Arc::new(AtomicBool::new(false)),
@@ -88,10 +113,13 @@ impl DeviceManager {
         let probes = self.probes.clone();
         let probe_discovered_tx = self.probe_discovered_tx.clone();
         let probe_stale_tx = self.probe_stale_tx.clone();
+        let probe_disconnected_tx = self.probe_disconnected_tx.clone();
+        let connect_permit = self.connect_permit.clone();
         let is_running = self.is_running.clone();
 
         let handle = tokio::spawn(async move {
             let mut rx = scanner.subscribe();
+            let mut disconnect_rx = scanner.subscribe_disconnects();
 
             while is_running.load(Ordering::SeqCst) {
                 tokio::select! {
@@ -100,6 +128,14 @@ impl DeviceManager {
                             event,
                             &probes,
                             &probe_discovered_tx,
+                            &connect_permit,
+                        ).await;
+                    }
+                    Ok(peripheral_id) = disconnect_rx.recv() => {
+                        Self::handle_disconnect_event(
+                            peripheral_id,
+                            &probes,
+                            &probe_disconnected_tx,
                         ).await;
                     }
                     _ = tokio::time::sleep(Duration::from_secs(1)) => {
@@ -171,21 +207,24 @@ impl DeviceManager {
     }
 
     /// Subscribe to probe discovery events.
-    pub fn subscribe_probe_discovered(&self) -> broadcast::Receiver<Arc<Probe>> {
+    ///
+    /// Each event carries the probe and the RSSI from the advertising packet that
+    /// triggered the discovery.
+    pub fn subscribe_probe_discovered(&self) -> broadcast::Receiver<DiscoveredProbeEvent> {
         self.probe_discovered_tx.subscribe()
     }
 
     /// Register a callback for when probes are discovered/updated.
     pub fn on_probe_discovered<F>(&self, callback: F) -> CallbackHandle
     where
-        F: Fn(Arc<Probe>) + Send + Sync + 'static,
+        F: Fn(DiscoveredProbeEvent) + Send + Sync + 'static,
     {
         let callback_id = self.callback_counter.fetch_add(1, Ordering::SeqCst);
         let mut rx = self.probe_discovered_tx.subscribe();
 
         let handle = tokio::spawn(async move {
-            while let Ok(probe) = rx.recv().await {
-                callback(probe);
+            while let Ok(event) = rx.recv().await {
+                callback(event);
             }
         });
 
@@ -197,6 +236,36 @@ impl DeviceManager {
     /// Subscribe to probe stale events.
     pub fn subscribe_probe_stale(&self) -> broadcast::Receiver<Arc<Probe>> {
         self.probe_stale_tx.subscribe()
+    }
+
+    /// Subscribe to probe link-layer disconnect events.
+    ///
+    /// Fires when the platform (BlueZ / Core Bluetooth / etc.) reports that a known
+    /// probe went offline. By the time subscribers receive the event, the probe's
+    /// internal [`ConnectionState`](crate::ble::connection::ConnectionState) has
+    /// already been reset to `Disconnected` and its cached GATT handles cleared.
+    /// Callers can drive their own reconnect policy from here.
+    pub fn subscribe_probe_disconnected(&self) -> broadcast::Receiver<Arc<Probe>> {
+        self.probe_disconnected_tx.subscribe()
+    }
+
+    /// Register a callback for when probes disconnect at the link layer.
+    pub fn on_probe_disconnected<F>(&self, callback: F) -> CallbackHandle
+    where
+        F: Fn(Arc<Probe>) + Send + Sync + 'static,
+    {
+        let callback_id = self.callback_counter.fetch_add(1, Ordering::SeqCst);
+        let mut rx = self.probe_disconnected_tx.subscribe();
+
+        let handle = tokio::spawn(async move {
+            while let Ok(probe) = rx.recv().await {
+                callback(probe);
+            }
+        });
+
+        CallbackHandle::new(callback_id, move || {
+            handle.abort();
+        })
     }
 
     /// Register a callback for when probes become stale/disconnected.
@@ -273,7 +342,8 @@ impl DeviceManager {
     async fn handle_discovery_event(
         event: ProbeDiscoveryEvent,
         probes: &Arc<RwLock<HashMap<String, Arc<Probe>>>>,
-        probe_discovered_tx: &broadcast::Sender<Arc<Probe>>,
+        probe_discovered_tx: &broadcast::Sender<DiscoveredProbeEvent>,
+        connect_permit: &Arc<Semaphore>,
     ) {
         let advertising_data = match &event.advertising_data {
             Some(data) => data,
@@ -315,11 +385,13 @@ impl DeviceManager {
                     return;
                 }
 
-                // Create new probe
+                // Create new probe — all probes on this adapter share one
+                // connect_permit so BlueZ Connect() calls are serialized.
                 let probe = Arc::new(Probe::new(
                     ble_identifier.clone(),
                     event.peripheral,
                     serial_number,
+                    connect_permit.clone(),
                 ));
                 probe.update_from_advertising(advertising_data, event.rssi);
 
@@ -335,7 +407,10 @@ impl DeviceManager {
         };
 
         // Send discovery event
-        let _ = probe_discovered_tx.send(probe);
+        let _ = probe_discovered_tx.send(DiscoveredProbeEvent {
+            probe,
+            rssi: event.rssi,
+        });
     }
 
     /// Check for stale probes and emit events.
@@ -348,6 +423,49 @@ impl DeviceManager {
                 let _ = probe_stale_tx.send(probe.clone());
             }
         }
+    }
+
+    /// Route a `DeviceDisconnected` event from the scanner to the affected probe.
+    ///
+    /// Looks up the probe by its BLE identifier (the string form of
+    /// [`PeripheralId`], which is what we store on the [`Probe`] at discovery time).
+    /// The probe registry caps at [`MAX_PROBES`] entries so the linear scan is
+    /// trivial. Returns silently if the peripheral is not one of ours.
+    async fn handle_disconnect_event(
+        peripheral_id: PeripheralId,
+        probes: &Arc<RwLock<HashMap<String, Arc<Probe>>>>,
+        probe_disconnected_tx: &broadcast::Sender<Arc<Probe>>,
+    ) {
+        let identifier_str = peripheral_id.to_string();
+
+        // Collect the matching probe into a local, releasing the lock before awaiting.
+        let probe = {
+            let probes_read = probes.read();
+            probes_read
+                .values()
+                .find(|p| p.identifier() == identifier_str)
+                .cloned()
+        };
+
+        let Some(probe) = probe else {
+            debug!(
+                peripheral_id = %identifier_str,
+                "DeviceDisconnected for peripheral not in our probe registry — ignoring",
+            );
+            return;
+        };
+
+        info!(
+            serial = %probe.serial_number_string(),
+            peripheral_id = %identifier_str,
+            "Routing link-layer disconnect to probe",
+        );
+
+        probe.handle_link_disconnect().await;
+
+        // Broadcast to external subscribers (e.g. caller-side reconnect drivers).
+        // Send-error means no live subscribers, which is fine.
+        let _ = probe_disconnected_tx.send(probe);
     }
 }
 
@@ -364,5 +482,35 @@ mod tests {
     #[test]
     fn test_max_probes_constant() {
         assert_eq!(MAX_PROBES, 8);
+    }
+
+    /// LIB-7: the new `probe_disconnected_tx` channel must accept sends even when there
+    /// are no live subscribers (send returns `Err(SendError)`, which we tolerate). Two
+    /// subscribers should both receive a broadcasted event.
+    #[tokio::test]
+    async fn test_probe_disconnected_broadcast_plumbing() {
+        let (tx, mut rx_a) = broadcast::channel::<String>(8);
+        let mut rx_b = tx.subscribe();
+
+        // No live subs: cannot happen here since we created two, but exercise the
+        // pattern used by handle_disconnect_event — send-error is ignored.
+        let _ = tx.send("c2:71:2a:e7:88:d0".to_string());
+
+        let a = rx_a.recv().await.expect("subscriber A receives event");
+        let b = rx_b.recv().await.expect("subscriber B receives event");
+        assert_eq!(a, "c2:71:2a:e7:88:d0");
+        assert_eq!(b, "c2:71:2a:e7:88:d0");
+    }
+
+    /// LIB-7: with no subscribers, broadcasting a disconnect must not panic.
+    /// `handle_disconnect_event` calls `let _ = probe_disconnected_tx.send(probe)` —
+    /// this asserts that pattern is safe.
+    #[tokio::test]
+    async fn test_probe_disconnected_send_with_no_subscribers_is_safe() {
+        let (tx, _initial_rx) = broadcast::channel::<u8>(4);
+        drop(_initial_rx);
+        // No subscribers — send returns Err but we don't unwrap, mirroring production code.
+        let result = tx.send(42);
+        assert!(result.is_err(), "send with no subscribers returns Err");
     }
 }
