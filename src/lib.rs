@@ -82,7 +82,7 @@ pub mod protocol;
 pub mod utils;
 
 // Re-exports for convenience
-pub use device_manager::{DeviceManager, DiscoveredProbeEvent, MAX_PROBES};
+pub use device_manager::{DeviceManager, DisconnectedProbeEvent, DiscoveredProbeEvent, MAX_PROBES};
 pub use error::{Error, Result};
 pub use probe::{CallbackHandle, Probe};
 pub use utils::{celsius_to_fahrenheit, fahrenheit_to_celsius};

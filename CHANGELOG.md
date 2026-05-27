@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Error::DeviceDisconnectedDuringSetup { context }` variant, returned when the
   peripheral disconnects between service discovery and characteristic subscription. Callers
   should treat this as "fully disconnect + reconnect" rather than retrying with the same
-  cached `Probe` instance.
+  cached `Probe` instance. **Breaking:** `Error` is not `#[non_exhaustive]`, so downstream
+  code with exhaustive `match` arms on `Error` must add a handler for this variant.
 - `DiscoveredProbeEvent { probe, rssi }` carries the RSSI of the triggering advertisement
   packet so consumers can correlate connection failures to signal strength without reading
   it back from cached state.
@@ -26,8 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Probe::handle_link_disconnect()` — forwards to the above and clears the cached
   `CharacteristicHandler`, leaving the probe in a clean state for the next `connect()`.
 - `DeviceManager::subscribe_probe_disconnected()` and
-  `DeviceManager::on_probe_disconnected(F)` — receive `Arc<Probe>` notifications when the
-  platform reports a known probe went offline.
+  `DeviceManager::on_probe_disconnected(F)` — receive `DisconnectedProbeEvent { probe }`
+  notifications when the platform reports a known probe went offline. The event type is
+  a struct (rather than `Arc<Probe>` directly) for symmetry with `DiscoveredProbeEvent`
+  and to allow future additions without another breaking change.
+- `DisconnectedProbeEvent { probe }` payload for the disconnect channel.
 - `BleScanner::subscribe_disconnects()` — lower-level channel exposing `PeripheralId`
   values from `CentralEvent::DeviceDisconnected`.
 - Adapter-level `connect_permit: Arc<tokio::sync::Semaphore>` (permits=1) inside

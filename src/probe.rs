@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Semaphore};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::ble::advertising::{
     AdvertisingData, BatteryStatus, Overheating, ProbeColor, ProbeId, ProbeMode,
@@ -341,6 +341,35 @@ impl Probe {
 
         self.connection.connect(true).await?;
 
+        // From here the BlueZ link is up. Any failure in GATT setup must roll back
+        // the link so internal state stays honest with BlueZ — otherwise the next
+        // `Probe::connect()` would see `ConnectionState::Connected` AND `peripheral`
+        // alive, short-circuit through the LIB-7 defensive check, and skip GATT setup
+        // entirely — leaving the caller with a "connected" probe that never emits
+        // notifications.
+        match self.complete_gatt_setup(&serial, connect_start).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                warn!(
+                    serial = %serial,
+                    error = %e,
+                    "Post-link setup failed; disconnecting cleanly to roll back internal state",
+                );
+                let _ = self.connection.disconnect().await;
+                *self.characteristics.write() = None;
+                Err(e)
+            }
+        }
+    }
+
+    /// GATT discovery + subscribe + notification listener setup. Split out so
+    /// `connect()` can run a single error-handling branch for any post-link failure
+    /// and disconnect cleanly.
+    async fn complete_gatt_setup(
+        &self,
+        serial: &str,
+        connect_start: std::time::Instant,
+    ) -> Result<()> {
         // Set up characteristics handler. discover_characteristics validates the GATT
         // tree (services resolved, required UUIDs present) and returns a clear error if
         // the peripheral disconnected during setup.

@@ -185,6 +185,7 @@ impl ConnectionManager {
         };
 
         let link_start = std::time::Instant::now();
+        let mut last_attempt_error: Option<Error> = None;
 
         while attempts < max_attempts {
             attempts += 1;
@@ -208,19 +209,32 @@ impl ConnectionManager {
                     );
 
                     // Discover services and wait for the GATT tree to be fully resolved.
-                    if let Err(e) = self.resolve_services().await {
-                        warn!("Service resolution failed: {}", e);
-                        // Best-effort disconnect to release the half-open link.
-                        let _ = self.peripheral.disconnect().await;
-                        self.set_state(ConnectionState::Disconnected);
-                        return Err(e);
+                    // Service resolution can fail transiently on weak-RSSI peripherals
+                    // (ServicesResolved never fires within the timeout). Treat that like
+                    // a link-layer failure — disconnect cleanly and consume one retry —
+                    // rather than aborting the loop after a single attempt.
+                    match self.resolve_services().await {
+                        Ok(()) => {
+                            self.set_state(ConnectionState::Connected);
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            warn!(
+                                attempts = attempts,
+                                error = %e,
+                                "Service resolution failed; disconnecting and retrying",
+                            );
+                            let _ = self.peripheral.disconnect().await;
+                            last_attempt_error = Some(e);
+                            if attempts < max_attempts {
+                                tokio::time::sleep(self.reconnect_delay).await;
+                            }
+                        }
                     }
-
-                    self.set_state(ConnectionState::Connected);
-                    return Ok(());
                 }
                 Err(e) => {
                     warn!("Connection attempt {} failed: {}", attempts, e);
+                    last_attempt_error = Some(Error::Bluetooth(e));
 
                     if attempts < max_attempts {
                         tokio::time::sleep(self.reconnect_delay).await;
@@ -230,9 +244,9 @@ impl ConnectionManager {
         }
 
         self.set_state(ConnectionState::Disconnected);
-        Err(Error::ConnectionFailed {
+        Err(last_attempt_error.unwrap_or_else(|| Error::ConnectionFailed {
             reason: format!("Failed after {} attempts", max_attempts),
-        })
+        }))
     }
 
     /// Discover services and wait for the underlying BLE stack to fully resolve the GATT
@@ -389,7 +403,7 @@ impl ConnectionManager {
 /// The permit is released by RAII when `_permit` goes out of scope, so cancellation
 /// safety is automatic: if the outer future is dropped mid-acquire or mid-`fut.await`,
 /// the permit is released.
-pub(crate) async fn connect_with_permit<F, T>(permit: &Semaphore, fut: F) -> T
+async fn connect_with_permit<F, T>(permit: &Semaphore, fut: F) -> T
 where
     F: Future<Output = T>,
 {
@@ -587,21 +601,30 @@ mod tests {
     /// LIB-8: if the future passed to `connect_with_permit` is dropped mid-execution
     /// (cancellation), the permit must still be released. tokio's `SemaphorePermit`
     /// implements `Drop` for exactly this, but the test pins down that property.
+    ///
+    /// Synchronization uses a `Notify` rather than a fixed sleep so the test is
+    /// deterministic on slow / loaded CI — the inner future signals the moment it has
+    /// entered the permit-held region.
     #[tokio::test]
     async fn test_connect_permit_released_on_cancellation() {
-        let permit = Arc::new(Semaphore::new(1));
+        use tokio::sync::Notify;
 
-        // Spawn a task that holds the permit forever-ish, then abort it.
+        let permit = Arc::new(Semaphore::new(1));
+        let entered = Arc::new(Notify::new());
+
         let permit_for_task = permit.clone();
+        let entered_for_task = entered.clone();
         let handle = tokio::spawn(async move {
-            connect_with_permit(&permit_for_task, async {
+            connect_with_permit(&permit_for_task, async move {
+                entered_for_task.notify_one();
+                // Sleep long enough that we definitely have to abort to interrupt.
                 tokio::time::sleep(Duration::from_secs(30)).await;
             })
             .await;
         });
 
-        // Give the task time to acquire the permit.
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        // Deterministically wait until the task is inside the permit-held region.
+        entered.notified().await;
         assert_eq!(
             permit.available_permits(),
             0,

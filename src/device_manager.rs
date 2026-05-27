@@ -21,13 +21,6 @@ use crate::probe::{CallbackHandle, Probe};
 /// Maximum number of probes that can be managed simultaneously.
 pub const MAX_PROBES: usize = 8;
 
-/// Event emitted when a probe is discovered.
-#[derive(Debug, Clone)]
-pub struct ProbeEvent {
-    /// The probe that was discovered or updated.
-    pub identifier: String,
-}
-
 /// A probe-discovery broadcast payload.
 ///
 /// Carries the latest RSSI reading from the advertising packet that triggered the
@@ -40,6 +33,17 @@ pub struct DiscoveredProbeEvent {
     pub probe: Arc<Probe>,
     /// RSSI from the advertising packet, in dBm, if reported by the OS.
     pub rssi: Option<i16>,
+}
+
+/// A probe-disconnect broadcast payload.
+///
+/// Parallels [`DiscoveredProbeEvent`]. Currently carries only the probe; the struct
+/// shape exists so future additions (last-known RSSI, disconnect reason) don't force
+/// another breaking change to the broadcast type.
+#[derive(Debug, Clone)]
+pub struct DisconnectedProbeEvent {
+    /// The probe that disconnected at the link layer.
+    pub probe: Arc<Probe>,
 }
 
 /// Central manager for discovering and managing Combustion probes.
@@ -56,7 +60,7 @@ pub struct DeviceManager {
     probe_stale_tx: broadcast::Sender<Arc<Probe>>,
     /// Probe link-layer-disconnect channel — fires when the platform tells us a probe
     /// went offline (`CentralEvent::DeviceDisconnected`).
-    probe_disconnected_tx: broadcast::Sender<Arc<Probe>>,
+    probe_disconnected_tx: broadcast::Sender<DisconnectedProbeEvent>,
     /// Adapter-level semaphore (permits=1) shared with every `Probe`'s
     /// `ConnectionManager` so that BlueZ `Connect()` calls are serialized. See
     /// `ConnectionManager::connect_permit` for the rationale.
@@ -245,21 +249,21 @@ impl DeviceManager {
     /// internal [`ConnectionState`](crate::ble::connection::ConnectionState) has
     /// already been reset to `Disconnected` and its cached GATT handles cleared.
     /// Callers can drive their own reconnect policy from here.
-    pub fn subscribe_probe_disconnected(&self) -> broadcast::Receiver<Arc<Probe>> {
+    pub fn subscribe_probe_disconnected(&self) -> broadcast::Receiver<DisconnectedProbeEvent> {
         self.probe_disconnected_tx.subscribe()
     }
 
     /// Register a callback for when probes disconnect at the link layer.
     pub fn on_probe_disconnected<F>(&self, callback: F) -> CallbackHandle
     where
-        F: Fn(Arc<Probe>) + Send + Sync + 'static,
+        F: Fn(DisconnectedProbeEvent) + Send + Sync + 'static,
     {
         let callback_id = self.callback_counter.fetch_add(1, Ordering::SeqCst);
         let mut rx = self.probe_disconnected_tx.subscribe();
 
         let handle = tokio::spawn(async move {
-            while let Ok(probe) = rx.recv().await {
-                callback(probe);
+            while let Ok(event) = rx.recv().await {
+                callback(event);
             }
         });
 
@@ -434,7 +438,7 @@ impl DeviceManager {
     async fn handle_disconnect_event(
         peripheral_id: PeripheralId,
         probes: &Arc<RwLock<HashMap<String, Arc<Probe>>>>,
-        probe_disconnected_tx: &broadcast::Sender<Arc<Probe>>,
+        probe_disconnected_tx: &broadcast::Sender<DisconnectedProbeEvent>,
     ) {
         let identifier_str = peripheral_id.to_string();
 
@@ -465,7 +469,7 @@ impl DeviceManager {
 
         // Broadcast to external subscribers (e.g. caller-side reconnect drivers).
         // Send-error means no live subscribers, which is fine.
-        let _ = probe_disconnected_tx.send(probe);
+        let _ = probe_disconnected_tx.send(DisconnectedProbeEvent { probe });
     }
 }
 
