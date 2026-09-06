@@ -1,7 +1,7 @@
 # Project Memory
 
 ## Current State
-- **Active Milestone**: Release Readiness
+- **Active Milestone**: None (Release Readiness complete)
 - **Current Issue**: None
 - **Current Branch**: main
 - **Plugin Version**: 1.3.0
@@ -28,6 +28,10 @@
 
 - [2026-09-05 20:50] @jameswanga: PR #7 approved and merged; issue #4 closed. All Release Readiness issues done.
 - [2026-09-05 21:00] @jameswanga: Refreshed architecture diagram (trigger: issue-close #2 #3 #4, diagram type: flowchart, coverage-gap: REQUIREMENTS.MD is git-ignored so its Architecture section is local-only)
+
+- [2026-09-05 21:10] @jameswanga: Milestone "Release Readiness" closed on GitHub; REQUIREMENTS.MD line checked and annotated locally (file is git-ignored).
+- [2026-09-05 21:15] @jameswanga: Released combustion-rust-ble v0.1.0 — no prior tag, Cargo.toml already stated 0.1.0, so the first tag adopted the manifest version (no bump computed). Tag pushed, GitHub Release created, workflow run 34007699992 published 0.1.0 to crates.io successfully. Release URL: https://github.com/jwanga/combustion-rust-ble/releases/tag/v0.1.0
+- [2026-09-05 21:15] @jameswanga: Unguided run ended at milestone boundary (scope=milestone). Known follow-ups: pre-existing `clippy::erasing_op` error in src/protocol/status.rs:401 test code; REQUIREMENTS.MD is git-ignored so milestone tracking there is local-only; stale local branches issue-2/3/4 not deleted (permission classifier blocked `git branch -D`).
 
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->
