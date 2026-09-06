@@ -1,7 +1,7 @@
 # Project Memory
 
 ## Current State
-- **Active Milestone**: Shared Adapter Scan Ownership (#2)
+- **Active Milestone**: None (Shared Adapter Scan Ownership complete)
 - **Current Issue**: None
 - **Current Branch**: main
 - **Plugin Version**: 1.3.0
@@ -50,6 +50,10 @@
 
 - [2026-09-05 23:15] @jameswanga: PR #13 merged; issue #10 closed. All Shared Adapter Scan Ownership issues done.
 - [2026-09-05 23:20] @jameswanga: Refreshed architecture diagram (trigger: issue-close #8 #9 #10, diagram type: flowchart; targeted update of AUTO sections for ScanSession/scan modes and new Error variants rather than full regeneration)
+
+- [2026-09-05 23:30] @jameswanga: Milestone "Shared Adapter Scan Ownership" (#2) closed; REQUIREMENTS.MD checked + annotated locally (git-ignored).
+- [2026-09-05 23:40] @jameswanga: Released combustion-rust-ble v0.2.0 — MINOR under 0.x because two `feat!` commits (Error::ScanInProgress, Error::ScanModeMismatch added to a non-`#[non_exhaustive]` enum) since v0.1.0; plain feat commits alone would have been PATCH. Tag pushed, GitHub Release created with --notes-start-tag v0.1.0, workflow run 34009089991 published 0.2.0 to crates.io. URL: https://github.com/jwanga/combustion-rust-ble/releases/tag/v0.2.0
+- [2026-09-05 23:40] @jameswanga: Unguided run ended at milestone boundary (scope=milestone).
 
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->
