@@ -2,8 +2,8 @@
 
 ## Current State
 - **Active Milestone**: Release Readiness
-- **Current Issue**: #2 Bump btleplug to 0.13 (PR #5 open)
-- **Current Branch**: issue-2-bump-btleplug
+- **Current Issue**: #3 Init from existing Adapter
+- **Current Branch**: issue-3-with-adapter
 - **Plugin Version**: 1.3.0
 
 ## Progress Log
@@ -15,6 +15,9 @@
 - [2026-09-05 19:45] @jameswanga: Issue #2: clarifying-question gate — defaults accepted (handle RssiUpdate by refreshing known probes only; raise rust-version to 1.85 since uuid/getrandom require it). Implemented, tests green, PR #5 opened; review agents launched.
 
 - [2026-09-05 19:52] @jameswanga: PR #5 review: simplicity clean; conventions flagged duplicate CHANGELOG `### Changed` heading (Critical, fixed), stale INSTRUCTIONS.md Deploy text and MEMORY.md note (Important, fixed).
+
+- [2026-09-05 20:02] @jameswanga: PR #5 approved and merged; issue #2 closed. Local branch delete was blocked by the permission classifier (left in place). Architecture refresh deferred to milestone end to avoid regenerating three times in one run.
+- [2026-09-05 20:10] @jameswanga: Issue #3: gate defaults accepted (non-async infallible `with_adapter`, shared `from_scanner` path, `adapter()` getter, `pub use btleplug` re-export, `existing_adapter` example). Implemented, tests + doctests green.
 
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->

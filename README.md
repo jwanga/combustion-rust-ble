@@ -69,6 +69,33 @@ async fn main() -> Result<()> {
 }
 ```
 
+### Using an existing btleplug adapter
+
+If your application already owns a `btleplug::platform::Adapter` (for example
+because it also talks to other BLE devices), hand it to the library instead of
+letting it open a second `Manager`. The crate re-exports `btleplug` so the
+`Adapter` type is guaranteed to match the version the library was built with:
+
+```rust
+use combustion_rust_ble::btleplug::api::Manager as _;
+use combustion_rust_ble::btleplug::platform::Manager;
+use combustion_rust_ble::{DeviceManager, Error, Result};
+
+async fn run() -> Result<()> {
+    let btle = Manager::new().await?;
+    let adapter = btle
+        .adapters()
+        .await?
+        .into_iter()
+        .next()
+        .ok_or(Error::BluetoothUnavailable)?;
+
+    let manager = DeviceManager::with_adapter(adapter);
+    manager.start_scanning().await?;
+    Ok(())
+}
+```
+
 ## Examples
 
 Run the examples with `cargo run --example <name>`:
@@ -84,6 +111,7 @@ Run the examples with `cargo run --example <name>`:
 | `alarm_control` | Temperature alarm and power mode control |
 | `probe_dashboard` | Full-featured TUI dashboard with ratatui |
 | `probe_debug` | Debug tool for BLE communication and data parsing |
+| `existing_adapter` | Hand an application-owned btleplug `Adapter` to the library |
 
 ```bash
 # Discover all nearby probes
@@ -170,6 +198,9 @@ use combustion_rust_ble::{DeviceManager, Result};
 #[tokio::main]
 async fn main() -> Result<()> {
     let manager = DeviceManager::new().await?;
+    // ...or reuse an adapter your application already holds:
+    // let manager = DeviceManager::with_adapter(adapter);
+    manager.adapter();                   // Access the underlying btleplug Adapter
 
     // Scanning
     manager.start_scanning().await?;

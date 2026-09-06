@@ -56,6 +56,12 @@
 //! }
 //! ```
 //!
+//! ## Using an existing btleplug adapter
+//!
+//! If your application already holds a `btleplug::platform::Adapter`, pass it to
+//! [`DeviceManager::with_adapter`] instead of calling [`DeviceManager::new`]. The
+//! crate re-exports `btleplug` so the adapter type always matches.
+//!
 //! ## Platform Notes
 //!
 //! ### macOS
@@ -71,6 +77,12 @@
 //! ## Feature Flags
 //!
 //! - `serde`: Enable serialization/deserialization for data types
+
+/// The btleplug version this crate is built against.
+///
+/// Use it when handing an existing adapter to [`DeviceManager::with_adapter`] so the
+/// `Adapter` type is guaranteed to match.
+pub use btleplug;
 
 // Public modules
 pub mod ble;
