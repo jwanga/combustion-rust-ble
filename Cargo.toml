@@ -73,3 +73,6 @@ path = "examples/food_safety.rs"
 name = "probe_dashboard"
 path = "examples/probe_dashboard.rs"
 
+[[example]]
+name = "existing_adapter"
+path = "examples/existing_adapter.rs"

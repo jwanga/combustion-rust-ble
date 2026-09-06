@@ -69,17 +69,7 @@ impl BleScanner {
             adapter.adapter_info().await.ok()
         );
 
-        let (event_tx, _) = broadcast::channel(100);
-        let (disconnect_tx, _) = broadcast::channel(32);
-
-        Ok(Self {
-            adapter,
-            is_scanning: Arc::new(RwLock::new(false)),
-            discovered: Arc::new(RwLock::new(HashMap::new())),
-            event_tx,
-            disconnect_tx,
-            scan_handle: Arc::new(RwLock::new(None)),
-        })
+        Ok(Self::with_adapter(adapter))
     }
 
     /// Create a new BLE scanner with a specific adapter.

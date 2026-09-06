@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `DeviceManager::with_adapter(Adapter)` — construct the manager on a btleplug
+  `Adapter` the application already owns, instead of opening a second `Manager`.
+  `DeviceManager::adapter()` returns the adapter in use.
+- `combustion_rust_ble::btleplug` re-export so callers can name the exact btleplug
+  version this crate links against.
+- `existing_adapter` example demonstrating the above.
 - `Error::DeviceDisconnectedDuringSetup { context }` variant, returned when the
   peripheral disconnects between service discovery and characteristic subscription. Callers
   should treat this as "fully disconnect + reconnect" rather than retrying with the same

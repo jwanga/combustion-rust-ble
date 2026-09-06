@@ -5,7 +5,7 @@
 //! and managed. Other Combustion devices (Display, Booster, MeatNet Repeater,
 //! Giant Grill Gauge) are intentionally filtered out.
 
-use btleplug::platform::PeripheralId;
+use btleplug::platform::{Adapter, PeripheralId};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -76,17 +76,75 @@ pub struct DeviceManager {
 impl DeviceManager {
     /// Create a new DeviceManager instance.
     ///
+    /// Opens the platform's btleplug [`Manager`](btleplug::platform::Manager) and uses
+    /// the first adapter it reports. If the application already owns an
+    /// [`Adapter`], use [`DeviceManager::with_adapter`] instead so both share one
+    /// handle.
+    ///
     /// # Errors
     ///
     /// Returns an error if Bluetooth is not available.
     pub async fn new() -> Result<Self> {
         let scanner = BleScanner::new().await?;
+        Ok(Self::from_scanner(scanner))
+    }
 
+    /// Create a DeviceManager on an adapter the application already holds.
+    ///
+    /// This is the entry point for applications that talk to other BLE devices
+    /// through btleplug and do not want this library to open a second
+    /// [`Manager`](btleplug::platform::Manager). The `Adapter` type must come from
+    /// the same btleplug version this crate links against; use the re-exported
+    /// [`combustion_rust_ble::btleplug`](crate::btleplug) to guarantee that.
+    ///
+    /// The manager does not touch the adapter until
+    /// [`start_scanning`](Self::start_scanning) is called.
+    ///
+    /// # Shared scan state
+    ///
+    /// Scan state belongs to the adapter, not to this manager. `start_scanning` calls
+    /// `Adapter::start_scan` with an empty `ScanFilter` (replacing any filter the
+    /// application set), and `stop_scanning` / `shutdown` call `Adapter::stop_scan`,
+    /// which also ends any scan the application started on the same adapter. On BlueZ,
+    /// calling `start_scanning` while the application is already scanning returns
+    /// `Error::Bluetooth` (`InProgress`). Coordinate scanning through one owner: either
+    /// let this manager drive the scan and read other peripherals via
+    /// [`adapter()`](Self::adapter), or stop the application's scan before calling
+    /// `start_scanning`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use combustion_rust_ble::btleplug::api::Manager as _;
+    /// use combustion_rust_ble::btleplug::platform::Manager;
+    /// use combustion_rust_ble::{DeviceManager, Error, Result};
+    ///
+    /// # async fn run() -> Result<()> {
+    /// let btle = Manager::new().await?;
+    /// let adapter = btle
+    ///     .adapters()
+    ///     .await?
+    ///     .into_iter()
+    ///     .next()
+    ///     .ok_or(Error::BluetoothUnavailable)?;
+    ///
+    /// let manager = DeviceManager::with_adapter(adapter);
+    /// manager.start_scanning().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_adapter(adapter: Adapter) -> Self {
+        Self::from_scanner(BleScanner::with_adapter(adapter))
+    }
+
+    /// Shared construction path for [`new`](Self::new) and
+    /// [`with_adapter`](Self::with_adapter).
+    fn from_scanner(scanner: BleScanner) -> Self {
         let (probe_discovered_tx, _) = broadcast::channel(32);
         let (probe_stale_tx, _) = broadcast::channel(32);
         let (probe_disconnected_tx, _) = broadcast::channel(32);
 
-        Ok(Self {
+        Self {
             scanner: Arc::new(scanner),
             probes: Arc::new(RwLock::new(HashMap::new())),
             meatnet_enabled: AtomicBool::new(false),
@@ -97,7 +155,12 @@ impl DeviceManager {
             callback_counter: AtomicU64::new(0),
             background_handle: RwLock::new(None),
             is_running: Arc::new(AtomicBool::new(false)),
-        })
+        }
+    }
+
+    /// Get the btleplug [`Adapter`] this manager scans and connects through.
+    pub fn adapter(&self) -> &Adapter {
+        self.scanner.adapter()
     }
 
     /// Initialize Bluetooth and start scanning for probes.
@@ -486,6 +549,14 @@ mod tests {
     #[test]
     fn test_max_probes_constant() {
         assert_eq!(MAX_PROBES, 8);
+    }
+
+    /// `with_adapter` must stay a plain, infallible, non-async constructor so callers can
+    /// wrap an adapter they already hold without an extra await or error path.
+    #[test]
+    fn test_with_adapter_signature() {
+        let _ctor: fn(Adapter) -> DeviceManager = DeviceManager::with_adapter;
+        let _getter: fn(&DeviceManager) -> &Adapter = DeviceManager::adapter;
     }
 
     /// LIB-7: the new `probe_disconnected_tx` channel must accept sends even when there
