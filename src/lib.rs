@@ -102,6 +102,7 @@ pub use utils::{celsius_to_fahrenheit, fahrenheit_to_celsius};
 // Re-export commonly used types from submodules
 pub use ble::advertising::{BatteryStatus, Overheating, ProbeColor, ProbeId, ProbeMode};
 pub use ble::connection::ConnectionState;
+pub use ble::scanner::ScanMode;
 pub use data::{
     AlarmConfig, AlarmStatus, FoodSafeConfig, FoodSafeData, FoodSafeMode, FoodSafeProduct,
     FoodSafeServingState, FoodSafeState, FoodSafeStatus, IntegratedProduct, LoggedDataPoint,

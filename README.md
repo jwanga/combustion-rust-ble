@@ -102,6 +102,11 @@ Scan state lives on the adapter, so `start_scanning()` / `stop_scanning()` /
 one owner drive the scan; other peripherals remain reachable through
 `manager.adapter()`.
 
+If your application already runs the scan, call `manager.attach().await?`
+instead of `start_scanning()`. The library then only consumes events, and
+`stop_scanning()` / `shutdown()` leave the host's scan running.
+`manager.scan_mode()` reports `ScanMode::Owned` or `ScanMode::Attached`.
+
 ## Examples
 
 Run the examples with `cargo run --example <name>`:
@@ -209,8 +214,10 @@ async fn main() -> Result<()> {
     manager.adapter();                   // Access the underlying btleplug Adapter
 
     // Scanning
-    manager.start_scanning().await?;
-    manager.stop_scanning().await?;
+    manager.start_scanning().await?;    // Own the adapter scan
+    manager.attach().await?;            // ...or join a scan the host already runs
+    manager.scan_mode();                // Some(ScanMode::Owned | Attached) while active
+    manager.stop_scanning().await?;     // Calls stop_scan only in Owned mode
     manager.is_scanning();
 
     // Probe access

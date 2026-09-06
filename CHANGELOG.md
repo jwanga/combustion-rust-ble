@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `DeviceManager::attach()` / `BleScanner::attach()` — process discovery events on a
+  scan the host application already runs, without calling `Adapter::start_scan`.
+  `stop_scanning` / `shutdown` after `attach` stop event processing but never call
+  `Adapter::stop_scan`.
+- `ScanMode` (`Owned` | `Attached`) and `DeviceManager::scan_mode()` /
+  `BleScanner::scan_mode()` to report how the current scan was started.
+- `Error::ScanModeMismatch { current, requested }`, returned when `attach` is called
+  on a manager that owns its scan or vice versa. **Breaking:** `Error` is not
+  `#[non_exhaustive]`, so exhaustive `match` arms on `Error` must add a handler.
+
+### Fixed
+
+- A failing `Adapter::stop_scan` no longer strands the scanner in an inactive state
+  with the adapter scan still running; the session stays active so `stop_scanning`
+  can be retried, and a later start never leaves two event loops running.
+
 ## [0.1.0] - 2026-09-05
 
 ### Added

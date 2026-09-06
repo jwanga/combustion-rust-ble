@@ -1,9 +1,9 @@
 # Project Memory
 
 ## Current State
-- **Active Milestone**: None (Release Readiness complete)
-- **Current Issue**: None
-- **Current Branch**: main
+- **Active Milestone**: Shared Adapter Scan Ownership (#2)
+- **Current Issue**: #8 attach mode
+- **Current Branch**: issue-8-attach-mode
 - **Plugin Version**: 1.3.0
 
 ## Progress Log
@@ -32,6 +32,11 @@
 - [2026-09-05 21:10] @jameswanga: Milestone "Release Readiness" closed on GitHub; REQUIREMENTS.MD line checked and annotated locally (file is git-ignored).
 - [2026-09-05 21:15] @jameswanga: Released combustion-rust-ble v0.1.0 — no prior tag, Cargo.toml already stated 0.1.0, so the first tag adopted the manifest version (no bump computed). Tag pushed, GitHub Release created, workflow run 34007699992 published 0.1.0 to crates.io successfully. Release URL: https://github.com/jwanga/combustion-rust-ble/releases/tag/v0.1.0
 - [2026-09-05 21:15] @jameswanga: Unguided run ended at milestone boundary (scope=milestone). Known follow-ups: pre-existing `clippy::erasing_op` error in src/protocol/status.rs:401 test code; REQUIREMENTS.MD is git-ignored so milestone tracking there is local-only; stale local branches issue-2/3/4 not deleted (permission classifier blocked `git branch -D`).
+
+- [2026-09-05 21:30] @jameswanga: Feature Classification (unguided): new milestone "Shared Adapter Scan Ownership" (#2) with issues #8 (attach mode + ScanControl seam), #9 (Error::ScanInProgress, breaking → feat! → 0.2.0), #10 (start_scanning_with_filter + co-hosting docs).
+- [2026-09-05 21:40] @jameswanga: Issue #8 gate defaults: async fallible `attach()`, `ScanSession` state machine behind `ScanControl` trait (impl for Adapter) tested with a counting fake, `is_scanning()` true in both modes, `ScanMode` + `scan_mode()` exposed and re-exported. Implemented; 98 tests green.
+
+- [2026-09-05 22:00] @jameswanga: PR #11 review: fixed ScanSession dual-state, end() returns mode, ScanControl made pub(crate) (no re-export), DeviceManager start_with helper, reverted rustfmt churn in 5 unrelated files, test_ prefixes, README attach/scan_mode docs, Error::ScanModeMismatch on mode switch (breaking → feat!), tokio Mutex serializing begin/end, stop-failure keeps session active + handles joined/aborted before respawn. Dismissed: end-to-end `DeviceManager::attach → shutdown` test against a fake — BleScanner requires a real `Adapter` to construct, impossible without hardware; ScanSession tests cover the invariant and ScanControl is now private so no API surface leaks.
 
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->

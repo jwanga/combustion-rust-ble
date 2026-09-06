@@ -115,6 +115,19 @@ pub enum Error {
         /// The UUID of the service that was not found.
         uuid: String,
     },
+
+    /// Scanning is already active in a different [`ScanMode`](crate::ScanMode).
+    ///
+    /// Returned when `attach` is called on a manager that owns its scan, or
+    /// `start_scanning` is called on a manager that is attached to the host's scan.
+    /// Stop scanning first, then start in the desired mode.
+    #[error("Scan already active in {current:?} mode; requested {requested:?}")]
+    ScanModeMismatch {
+        /// The mode the scan is currently running in.
+        current: crate::ScanMode,
+        /// The mode that was requested.
+        requested: crate::ScanMode,
+    },
 }
 
 /// A specialized Result type for this crate.
