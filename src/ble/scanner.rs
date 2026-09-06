@@ -252,6 +252,27 @@ impl BleScanner {
                     Self::process_peripheral(adapter, id, discovered, event_tx).await;
                 }
             }
+            CentralEvent::RssiUpdate { id, rssi } => {
+                let key = id.to_string();
+                if cfg!(target_os = "linux") {
+                    // BlueZ never emits `DeviceUpdated`, so `RssiUpdate` is the only
+                    // per-advertisement signal there. Refresh known probes only; the RSSI
+                    // is folded into the next `ProbeDiscoveryEvent` via `properties().rssi`.
+                    if discovered.read().contains_key(&key) {
+                        trace!("RSSI update for {:?}: {} dBm", id, rssi);
+                        Self::process_peripheral(adapter, id, discovered, event_tx).await;
+                    }
+                } else if let Some(entry) = discovered.write().get_mut(&key) {
+                    // Windows/macOS already deliver `DeviceUpdated` per advertisement;
+                    // avoid a duplicate event and just keep the cached snapshot fresh.
+                    entry.rssi = Some(rssi);
+                }
+            }
+            CentralEvent::DeviceServicesModified(id) => {
+                // CoreBluetooth only. The GATT table changed; the next connect will
+                // rediscover services, so there is nothing to do here.
+                trace!("Device services modified: {:?}", id);
+            }
             CentralEvent::ServiceDataAdvertisement { .. } => {}
             CentralEvent::ServicesAdvertisement { .. } => {}
             CentralEvent::StateUpdate(_) => {}
