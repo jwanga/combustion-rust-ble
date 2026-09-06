@@ -3,6 +3,10 @@
 //! Use this pattern when your application already talks to other BLE devices
 //! through btleplug and should not open a second `Manager`.
 //!
+//! Scan state belongs to the adapter: `start_scanning` / `stop_scanning` /
+//! `shutdown` start and stop the adapter's scan for every user of it, so let
+//! one owner (here, the library) drive scanning.
+//!
 //! Run with: cargo run --example existing_adapter
 
 use combustion_rust_ble::btleplug::api::{Central as _, Manager as _};

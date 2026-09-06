@@ -19,6 +19,8 @@
 - [2026-09-05 20:02] @jameswanga: PR #5 approved and merged; issue #2 closed. Local branch delete was blocked by the permission classifier (left in place). Architecture refresh deferred to milestone end to avoid regenerating three times in one run.
 - [2026-09-05 20:10] @jameswanga: Issue #3: gate defaults accepted (non-async infallible `with_adapter`, shared `from_scanner` path, `adapter()` getter, `pub use btleplug` re-export, `existing_adapter` example). Implemented, tests + doctests green.
 
+- [2026-09-05 20:20] @jameswanga: PR #6 review: dedup BleScanner::new via with_adapter (Important, fixed); documented shared-scan hazard on with_adapter/README/example (Important, fixed); getter doc wording + rustfmt on example (Important, fixed).
+
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->
 - [2026-09-05 19:40] @jameswanga: Release config inferred as `mode: single`, tag `v{version}`, manifest `Cargo.toml:[package].version`. First tag will adopt the manifest version (0.1.0).

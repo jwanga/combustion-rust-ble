@@ -96,6 +96,12 @@ async fn run() -> Result<()> {
 }
 ```
 
+Scan state lives on the adapter, so `start_scanning()` / `stop_scanning()` /
+`shutdown()` start and stop the adapter's scan for *everyone* sharing it, and
+`start_scanning()` fails on BlueZ if the application is already scanning. Let
+one owner drive the scan; other peripherals remain reachable through
+`manager.adapter()`.
+
 ## Examples
 
 Run the examples with `cargo run --example <name>`:

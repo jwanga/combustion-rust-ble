@@ -97,8 +97,20 @@ impl DeviceManager {
     /// the same btleplug version this crate links against; use the re-exported
     /// [`combustion_rust_ble::btleplug`](crate::btleplug) to guarantee that.
     ///
-    /// The manager does not start scanning until [`start_scanning`](Self::start_scanning)
-    /// is called, and it never stops a scan it did not start.
+    /// The manager does not touch the adapter until
+    /// [`start_scanning`](Self::start_scanning) is called.
+    ///
+    /// # Shared scan state
+    ///
+    /// Scan state belongs to the adapter, not to this manager. `start_scanning` calls
+    /// `Adapter::start_scan` with an empty `ScanFilter` (replacing any filter the
+    /// application set), and `stop_scanning` / `shutdown` call `Adapter::stop_scan`,
+    /// which also ends any scan the application started on the same adapter. On BlueZ,
+    /// calling `start_scanning` while the application is already scanning returns
+    /// `Error::Bluetooth` (`InProgress`). Coordinate scanning through one owner: either
+    /// let this manager drive the scan and read other peripherals via
+    /// [`adapter()`](Self::adapter), or stop the application's scan before calling
+    /// `start_scanning`.
     ///
     /// # Example
     ///
@@ -146,7 +158,7 @@ impl DeviceManager {
         }
     }
 
-    /// The btleplug [`Adapter`] this manager scans and connects through.
+    /// Get the btleplug [`Adapter`] this manager scans and connects through.
     pub fn adapter(&self) -> &Adapter {
         self.scanner.adapter()
     }
