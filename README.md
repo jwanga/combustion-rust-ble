@@ -102,6 +102,16 @@ Scan state lives on the adapter, so `start_scanning()` / `stop_scanning()` /
 is already scanning, so match on it and fall back to `attach()`. Let one owner
 drive the scan; other peripherals remain reachable through `manager.adapter()`.
 
+**Running alongside another BLE driver.** Let this manager own the scan and
+give the other crate (for example `fluke-connect-client`) the adapter: it can
+watch `manager.adapter().events()` for its device, fetch the peripheral with
+`manager.adapter().peripheral(&id)`, and connect. Connecting does not touch
+scan state, so the other crate needs no scan control at all; it only has to
+avoid calling `stop_scan` on the shared adapter. `start_scanning()` uses an
+empty `ScanFilter` on purpose: Combustion probes are matched on manufacturer
+data, not a service UUID, so a UUID filter would hide them. If your host needs
+a filter anyway, `start_scanning_with_filter(filter)` passes it through.
+
 If your application already runs the scan, call `manager.attach().await?`
 instead of `start_scanning()`. The library then only consumes events, and
 `stop_scanning()` / `shutdown()` leave the host's scan running.
@@ -225,7 +235,8 @@ async fn main() -> Result<()> {
     manager.adapter();                   // Access the underlying btleplug Adapter
 
     // Scanning
-    manager.start_scanning().await?;    // Own the adapter scan
+    manager.start_scanning().await?;    // Own the adapter scan (empty ScanFilter)
+    manager.start_scanning_with_filter(filter).await?; // ...with a host-chosen filter
     manager.attach().await?;            // ...or join a scan the host already runs
     manager.scan_mode();                // Some(ScanMode::Owned | Attached) while active
     manager.stop_scanning().await?;     // Calls stop_scan only in Owned mode

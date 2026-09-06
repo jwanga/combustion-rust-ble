@@ -5,7 +5,8 @@
 //!
 //! Scan state belongs to the adapter: `start_scanning` / `stop_scanning` /
 //! `shutdown` start and stop the adapter's scan for every user of it, so let
-//! one owner (here, the library) drive scanning.
+//! one owner drive scanning. This example tries to own the scan and falls back
+//! to `attach()` if the host is already scanning (`Error::ScanInProgress`).
 //!
 //! Run with: cargo run --example existing_adapter
 
@@ -38,7 +39,13 @@ async fn main() -> Result<()> {
 
     // ...and lends the adapter to combustion-rust-ble.
     let manager = DeviceManager::with_adapter(adapter);
-    manager.start_scanning().await?;
+
+    // Own the scan if nobody else does; otherwise ride along on the host's scan.
+    match manager.start_scanning().await {
+        Err(Error::ScanInProgress) => manager.attach().await?,
+        other => other?,
+    }
+    println!("Scan mode: {:?}", manager.scan_mode());
 
     println!("Scanning for 10 seconds...");
     tokio::time::sleep(Duration::from_secs(10)).await;

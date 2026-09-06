@@ -247,6 +247,21 @@ impl BleScanner {
             .await
     }
 
+    /// Start scanning for probes with a caller-supplied [`ScanFilter`].
+    ///
+    /// Identical to [`start_scanning`](Self::start_scanning) except that `filter` is
+    /// passed to `Adapter::start_scan`. Combustion probes are matched on
+    /// **manufacturer data**, not a service UUID, so a filter that lists service UUIDs
+    /// will hide them on platforms that honour the filter; use this only when the host
+    /// needs a filter for other devices sharing the scan and accepts that trade-off.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`start_scanning`](Self::start_scanning).
+    pub async fn start_scanning_with_filter(&self, filter: ScanFilter) -> Result<()> {
+        self.start_with(ScanMode::Owned, filter).await
+    }
+
     /// Attach to a scan the host application already started on this adapter.
     ///
     /// Starts the event-processing task **without** calling `Adapter::start_scan`.

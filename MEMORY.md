@@ -2,8 +2,8 @@
 
 ## Current State
 - **Active Milestone**: Shared Adapter Scan Ownership (#2)
-- **Current Issue**: #9 ScanInProgress
-- **Current Branch**: issue-9-scan-in-progress
+- **Current Issue**: #10 filter + co-hosting docs
+- **Current Branch**: issue-10-filter-and-docs
 - **Plugin Version**: 1.3.0
 
 ## Progress Log
@@ -42,6 +42,9 @@
 - [2026-09-05 22:20] @jameswanga: Issue #9 gate defaults: map on message markers ("already in progress", "InProgress") because dbus::Error Display omits the D-Bus error name; mapping lives in ScanSession::begin so all owned-start paths share it; fake-adapter tests for the mapping and the attach fallback.
 
 - [2026-09-05 22:35] @jameswanga: PR #12 review: hoisted btleplug error-marker matching into `ble::btleplug_error_matches` (shared with characteristics.rs); README now names Error::ScanInProgress with a fallback snippet; CHANGELOG cross-ref fixed. Correctness reviewer verified the BlueZ error chain end to end; no findings.
+
+- [2026-09-05 22:45] @jameswanga: PR #12 merged; issue #9 closed. (Note: a `git checkout main --` churn-trim briefly reverted device_manager.rs doc changes; restored before merge.)
+- [2026-09-05 22:55] @jameswanga: Issue #10 gate defaults: `start_scanning_with_filter(ScanFilter)` on manager + scanner, `start_scanning()` keeps empty filter (documented: probes matched on manufacturer data); co-hosting docs on `with_adapter` + README (owner and attached arrangements, other driver uses adapter().events()/peripheral()); example shows ScanInProgress → attach fallback.
 
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->
