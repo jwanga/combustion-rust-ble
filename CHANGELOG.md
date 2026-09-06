@@ -7,14 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- Bumped `btleplug` from 0.11 to 0.13. The scanner now handles the
-  `CentralEvent::RssiUpdate` (refreshes RSSI on known probes) and
-  `CentralEvent::DeviceServicesModified` variants introduced in 0.12.
-- Minimum supported Rust version raised from 1.70 to 1.85, matching the
-  dependency tree's requirements.
-
 ### Added
 
 - `Error::DeviceDisconnectedDuringSetup { context }` variant, returned when the
@@ -67,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `notifications_started`, `connected`) at `info!` with structured fields, so
   `RUST_LOG=combustion_rust_ble=info` is sufficient to diagnose where a connect attempt
   failed.
+- Bumped `btleplug` from 0.11 to 0.13. The scanner now handles the
+  `CentralEvent::RssiUpdate` (refreshes RSSI on known probes) and
+  `CentralEvent::DeviceServicesModified` variants introduced in 0.12.
+- Minimum supported Rust version raised from 1.70 to 1.85, matching the
+  dependency tree's requirements.
 
 ### Fixed
 

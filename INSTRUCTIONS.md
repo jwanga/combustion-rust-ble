@@ -15,7 +15,7 @@ cargo test
 cargo run --example discover_probes
 
 ## Deploy
-Publishing to crates.io is automated: pushing a `v*` tag triggers `.github/workflows/release.yml`, which runs `release.sh` with the `CARGO_REGISTRY_TOKEN` repository secret.
+Publishing is manual (`cargo publish`) until issue #4 lands `.github/workflows/release.yml` + `release.sh`, which will publish to crates.io on `v*` tags using the `CARGO_REGISTRY_TOKEN` repository secret.
 
 ## Releases
 mode: single
