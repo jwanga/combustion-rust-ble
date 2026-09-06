@@ -2,8 +2,8 @@
 
 ## Current State
 - **Active Milestone**: Release Readiness
-- **Current Issue**: #4 crates.io publishing
-- **Current Branch**: issue-4-crates-io-publish
+- **Current Issue**: None
+- **Current Branch**: main
 - **Plugin Version**: 1.3.0
 
 ## Progress Log
@@ -25,6 +25,9 @@
 - [2026-09-05 20:35] @jameswanga: Issue #4: gate defaults accepted (release.sh verifies tag==manifest version, idempotent via crates.io lookup, `cargo publish --locked`; workflow on `v*` tags, ubuntu + libdbus-1-dev; .github/release.yml label categories). Fixed Cargo.toml repository URL to jwanga, dropped redundant `readme` key, folded the never-published placeholder `[0.1.0] - 2024-XX-XX` CHANGELOG section into `[Unreleased]` so the first `/release` produces one 0.1.0 heading.
 
 - [2026-09-05 20:45] @jameswanga: PR #7 review: single cargo metadata call, workflow relies on GITHUB_REF_NAME default, created `breaking`/`skip-changelog` labels, excluded MEMORY.md/INSTRUCTIONS.md/release.sh from the crate tarball, corrected workflow header comment (all Important, fixed).
+
+- [2026-09-05 20:50] @jameswanga: PR #7 approved and merged; issue #4 closed. All Release Readiness issues done.
+- [2026-09-05 21:00] @jameswanga: Refreshed architecture diagram (trigger: issue-close #2 #3 #4, diagram type: flowchart, coverage-gap: REQUIREMENTS.MD is git-ignored so its Architecture section is local-only)
 
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->
