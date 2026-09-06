@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `release.sh` and `.github/workflows/release.yml`: pushing a `v<semver>` tag now
+  publishes the crate to crates.io automatically. `.github/release.yml` categorizes
+  generated GitHub release notes by PR label.
 - `DeviceManager::with_adapter(Adapter)` — construct the manager on a btleplug
   `Adapter` the application already owns, instead of opening a second `Manager`.
   `DeviceManager::adapter()` returns the adapter in use.
@@ -45,6 +48,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `org.bluez.Device1.Connect()` calls so concurrent multi-probe connect attempts no
   longer race and trigger `DBus_Error_InProgress` ("Operation already in progress").
 - `ConnectionManager::connect_permits_available()` getter for telemetry / tests.
+- Probe discovery via BLE advertising packets
+- Real-time temperature reading from all 8 sensors
+- Virtual temperature calculation (Core, Surface, Ambient)
+- Temperature log download and storage
+- Prediction engine integration
+- Food safety (SafeCook/USDA Safe) feature support
+- Battery status monitoring
+- Overheat detection and alerts
+- Probe identification (ID 1-8, color assignment)
+- Session information management
+- Support for up to 8 simultaneous probes
+- Cross-platform support (macOS, Windows, Linux, iOS, Android)
+- Comprehensive documentation
+- Example applications
 
 ### Changed
 
@@ -65,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `notifications_started`, `connected`) at `info!` with structured fields, so
   `RUST_LOG=combustion_rust_ble=info` is sufficient to diagnose where a connect attempt
   failed.
-- Bumped `btleplug` from 0.11 to 0.13. The scanner now handles the
+- Bumped `btleplug` from 0.11 to 0.13 (the crate was developed against 0.11 but never published with it). The scanner now handles the
   `CentralEvent::RssiUpdate` (refreshes RSSI on known probes) and
   `CentralEvent::DeviceServicesModified` variants introduced in 0.12.
 - Minimum supported Rust version raised from 1.70 to 1.85, matching the
@@ -110,33 +127,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unrelated GATT operations (service discovery, characteristic subscription, etc.) are
   NOT serialized and continue running concurrently across probes.
 
-## [0.1.0] - 2024-XX-XX
-
-### Added
-
-- Initial release
-- Probe discovery via BLE advertising packets
-- Real-time temperature reading from all 8 sensors
-- Virtual temperature calculation (Core, Surface, Ambient)
-- Temperature log download and storage
-- Prediction engine integration
-- Food safety (SafeCook/USDA Safe) feature support
-- Battery status monitoring
-- Overheat detection and alerts
-- Probe identification (ID 1-8, color assignment)
-- Session information management
-- Support for up to 8 simultaneous probes
-- Cross-platform support (macOS, Windows, Linux, iOS, Android)
-- Comprehensive documentation
-- Example applications
-
-### Dependencies
-
-- `btleplug` 0.11 for cross-platform BLE
-- `tokio` for async runtime
-- `thiserror` for error handling
-- `tracing` for logging
-- Optional `serde` for serialization
-
-[Unreleased]: https://github.com/combustion-inc/combustion-rust-ble/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/combustion-inc/combustion-rust-ble/releases/tag/v0.1.0
+[Unreleased]: https://github.com/jwanga/combustion-rust-ble/commits/main

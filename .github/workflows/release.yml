@@ -1,0 +1,38 @@
+name: Release
+
+# Publishes the crate to crates.io whenever a release tag (v<semver>) is pushed.
+# Tags are pushed by the engineering-plugin /release skill after it has synced
+# Cargo.toml's version; the GitHub Release is created immediately after the
+# tag push, so it may not exist yet when this job starts. Nothing here needs it.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # btleplug's BlueZ backend links against D-Bus on Linux.
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+
+      - name: Publish
+        # release.sh reads the tag from $GITHUB_REF_NAME.
+        run: ./release.sh
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
