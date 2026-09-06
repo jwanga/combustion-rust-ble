@@ -244,11 +244,9 @@ impl ConnectionManager {
         }
 
         self.set_state(ConnectionState::Disconnected);
-        Err(
-            last_attempt_error.unwrap_or_else(|| Error::ConnectionFailed {
-                reason: format!("Failed after {} attempts", max_attempts),
-            }),
-        )
+        Err(last_attempt_error.unwrap_or_else(|| Error::ConnectionFailed {
+            reason: format!("Failed after {} attempts", max_attempts),
+        }))
     }
 
     /// Discover services and wait for the underlying BLE stack to fully resolve the GATT
@@ -479,12 +477,7 @@ mod tests {
             let state = Arc::new(RwLock::new(initial));
             let (tx, mut rx) = broadcast::channel::<ConnectionEvent>(8);
 
-            transition_state(
-                &state,
-                ConnectionState::Disconnected,
-                &tx,
-                "test-peripheral",
-            );
+            transition_state(&state, ConnectionState::Disconnected, &tx, "test-peripheral");
 
             assert_eq!(
                 *state.read(),

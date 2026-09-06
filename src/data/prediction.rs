@@ -259,14 +259,8 @@ mod tests {
         // Values outside 0-15 should also map to Unknown (masked to 4 bits)
         assert_eq!(PredictionState::from_raw(255), PredictionState::Unknown);
         // Test reserved states
-        assert_eq!(
-            PredictionState::from_raw(5),
-            PredictionState::ReservedState5
-        );
-        assert_eq!(
-            PredictionState::from_raw(14),
-            PredictionState::ReservedState14
-        );
+        assert_eq!(PredictionState::from_raw(5), PredictionState::ReservedState5);
+        assert_eq!(PredictionState::from_raw(14), PredictionState::ReservedState14);
     }
 
     #[test]

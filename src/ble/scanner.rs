@@ -48,7 +48,7 @@ pub enum ScanMode {
 /// The adapter-level scan calls, abstracted so ownership logic can be unit-tested
 /// without Bluetooth hardware.
 #[async_trait]
-pub trait ScanControl: Send + Sync {
+pub(crate) trait ScanControl: Send + Sync {
     /// Start the adapter scan with the given filter.
     async fn start_scan(&self, filter: ScanFilter) -> btleplug::Result<()>;
     /// Stop the adapter scan.
@@ -71,65 +71,84 @@ impl ScanControl for Adapter {
 /// Kept separate from [`BleScanner`] so the "never call `stop_scan` in attached
 /// mode" rule can be tested against a fake [`ScanControl`].
 pub(crate) struct ScanSession {
-    /// Whether the event loop should keep running. Shared with the spawned task.
-    active: Arc<RwLock<bool>>,
-    /// How the current scan was started; `None` while inactive.
-    mode: RwLock<Option<ScanMode>>,
+    /// How the current scan was started; `None` while inactive. Shared with the
+    /// spawned event loop, which runs while this is `Some`.
+    mode: Arc<RwLock<Option<ScanMode>>>,
+    /// Serializes `begin` / `end` across their adapter awaits so two concurrent
+    /// starts (or a start racing a stop) cannot both pass the state check.
+    transition: tokio::sync::Mutex<()>,
 }
 
 impl ScanSession {
     fn new() -> Self {
         Self {
-            active: Arc::new(RwLock::new(false)),
-            mode: RwLock::new(None),
+            mode: Arc::new(RwLock::new(None)),
+            transition: tokio::sync::Mutex::new(()),
         }
     }
 
-    /// The loop flag shared with the event-processing task.
-    fn active_flag(&self) -> Arc<RwLock<bool>> {
-        self.active.clone()
+    /// The state shared with the event-processing task; the loop runs while `Some`.
+    fn shared_mode(&self) -> Arc<RwLock<Option<ScanMode>>> {
+        self.mode.clone()
     }
 
     fn is_active(&self) -> bool {
-        *self.active.read()
+        self.mode.read().is_some()
     }
 
     fn mode(&self) -> Option<ScanMode> {
         *self.mode.read()
     }
 
+    /// Force the session inactive without touching the adapter (used on drop).
+    fn clear(&self) {
+        self.mode.write().take();
+    }
+
     /// Activate the session. In [`ScanMode::Owned`] this starts the adapter scan; in
     /// [`ScanMode::Attached`] the adapter is not touched. Returns `Ok(false)` if the
-    /// session was already active (no adapter call is made).
+    /// session was already active in the same mode (no adapter call is made), and
+    /// [`Error::ScanModeMismatch`] if it is active in the other mode.
     async fn begin(
         &self,
         control: &dyn ScanControl,
         mode: ScanMode,
         filter: ScanFilter,
     ) -> Result<bool> {
-        if self.is_active() {
-            return Ok(false);
+        let _guard = self.transition.lock().await;
+        match self.mode() {
+            Some(current) if current == mode => return Ok(false),
+            Some(current) => {
+                return Err(Error::ScanModeMismatch {
+                    current,
+                    requested: mode,
+                })
+            }
+            None => {}
         }
         if mode == ScanMode::Owned {
             control.start_scan(filter).await.map_err(Error::Bluetooth)?;
         }
         *self.mode.write() = Some(mode);
-        *self.active.write() = true;
         Ok(true)
     }
 
-    /// Deactivate the session. Calls `stop_scan` only if this session owns the scan.
-    /// Returns `Ok(false)` if the session was not active.
-    async fn end(&self, control: &dyn ScanControl) -> Result<bool> {
-        if !self.is_active() {
-            return Ok(false);
+    /// Deactivate the session and return the mode it was in. Calls `stop_scan` only if
+    /// this session owned the scan. Returns `Ok(None)` if the session was not active.
+    /// If `stop_scan` fails the session stays active in its previous mode so the caller
+    /// can retry.
+    async fn end(&self, control: &dyn ScanControl) -> Result<Option<ScanMode>> {
+        let _guard = self.transition.lock().await;
+        let Some(mode) = self.mode.write().take() else {
+            return Ok(None);
+        };
+        if mode == ScanMode::Owned {
+            if let Err(e) = control.stop_scan().await {
+                *self.mode.write() = Some(mode);
+                return Err(Error::Bluetooth(e));
+            }
         }
-        *self.active.write() = false;
-        let mode = self.mode.write().take();
-        if mode == Some(ScanMode::Owned) {
-            control.stop_scan().await.map_err(Error::Bluetooth)?;
-        }
-        Ok(true)
+        Ok(Some(mode))
     }
 }
 
@@ -213,17 +232,23 @@ impl BleScanner {
     ///
     /// # Errors
     ///
-    /// Currently infallible in practice; returns `Result` for symmetry with
-    /// [`start_scanning`](Self::start_scanning).
+    /// Returns [`Error::ScanModeMismatch`] if this scanner already owns a scan it
+    /// started via [`start_scanning`](Self::start_scanning).
     pub async fn attach(&self) -> Result<()> {
         self.start_with(ScanMode::Attached, ScanFilter::default())
             .await
     }
 
+    /// Shared start path. Any previous event loop is joined before a new one is
+    /// spawned so a failed stop cannot leave two loops feeding the same channels.
     async fn start_with(&self, mode: ScanMode, filter: ScanFilter) -> Result<()> {
         if !self.session.begin(&self.adapter, mode, filter).await? {
             debug!("Already scanning, ignoring start request");
             return Ok(());
+        }
+        let previous = self.scan_handle.write().take();
+        if let Some(handle) = previous {
+            let _ = handle.await;
         }
 
         match mode {
@@ -233,7 +258,7 @@ impl BleScanner {
 
         // Start the event processing task
         let adapter = self.adapter.clone();
-        let is_scanning = self.session.active_flag();
+        let is_scanning = self.session.shared_mode();
         let discovered = self.discovered.clone();
         let event_tx = self.event_tx.clone();
         let disconnect_tx = self.disconnect_tx.clone();
@@ -247,7 +272,7 @@ impl BleScanner {
                 }
             };
 
-            while *is_scanning.read() {
+            while is_scanning.read().is_some() {
                 tokio::select! {
                     Some(event) = events.next() => {
                         Self::handle_event(
@@ -260,7 +285,7 @@ impl BleScanner {
                     }
                     _ = tokio::time::sleep(Duration::from_millis(100)) => {
                         // Check if we should stop scanning
-                        if !*is_scanning.read() {
+                        if is_scanning.read().is_none() {
                             break;
                         }
                     }
@@ -281,19 +306,18 @@ impl BleScanner {
     /// ([`ScanMode::Owned`]). After [`attach`](Self::attach) the host's scan is left
     /// running.
     pub async fn stop_scanning(&self) -> Result<()> {
-        let mode = self.session.mode();
-        if !self.session.end(&self.adapter).await? {
-            debug!("Not scanning, ignoring stop request");
-            return Ok(());
-        }
-
-        match mode {
+        match self.session.end(&self.adapter).await? {
+            None => {
+                debug!("Not scanning, ignoring stop request");
+                return Ok(());
+            }
             Some(ScanMode::Owned) => info!("Stopped BLE scan"),
-            _ => info!("Detached from host-owned BLE scan"),
+            Some(ScanMode::Attached) => info!("Detached from host-owned BLE scan"),
         }
 
         // Wait for the scan task to complete
-        if let Some(handle) = self.scan_handle.write().take() {
+        let previous = self.scan_handle.write().take();
+        if let Some(handle) = previous {
             let _ = handle.await;
         }
 
@@ -458,7 +482,7 @@ impl BleScanner {
 
 impl Drop for BleScanner {
     fn drop(&mut self) {
-        *self.session.active.write() = false;
+        self.session.clear();
     }
 }
 
@@ -488,7 +512,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn attached_session_never_calls_start_or_stop_scan() {
+    async fn test_attached_session_never_calls_start_or_stop_scan() {
         let fake = FakeScan::default();
         let session = ScanSession::new();
 
@@ -499,7 +523,7 @@ mod tests {
         assert_eq!(session.mode(), Some(ScanMode::Attached));
         assert!(session.is_active());
 
-        assert!(session.end(&fake).await.unwrap());
+        assert_eq!(session.end(&fake).await.unwrap(), Some(ScanMode::Attached));
         assert!(!session.is_active());
         assert_eq!(session.mode(), None);
 
@@ -516,7 +540,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn owned_session_starts_and_stops_adapter_scan_once() {
+    async fn test_owned_session_starts_and_stops_adapter_scan_once() {
         let fake = FakeScan::default();
         let session = ScanSession::new();
 
@@ -524,19 +548,64 @@ mod tests {
             .begin(&fake, ScanMode::Owned, ScanFilter::default())
             .await
             .unwrap());
-        // Second begin is a no-op and does not touch the adapter again.
+        // Second begin in the same mode is a no-op and does not touch the adapter.
         assert!(!session
-            .begin(&fake, ScanMode::Attached, ScanFilter::default())
+            .begin(&fake, ScanMode::Owned, ScanFilter::default())
             .await
             .unwrap());
+        // Switching mode while active is rejected rather than silently ignored.
+        assert!(matches!(
+            session
+                .begin(&fake, ScanMode::Attached, ScanFilter::default())
+                .await,
+            Err(Error::ScanModeMismatch {
+                current: ScanMode::Owned,
+                requested: ScanMode::Attached
+            })
+        ));
         assert_eq!(session.mode(), Some(ScanMode::Owned));
 
-        assert!(session.end(&fake).await.unwrap());
+        assert_eq!(session.end(&fake).await.unwrap(), Some(ScanMode::Owned));
         // Second end is a no-op.
-        assert!(!session.end(&fake).await.unwrap());
+        assert_eq!(session.end(&fake).await.unwrap(), None);
 
         assert_eq!(fake.starts.load(Ordering::SeqCst), 1);
         assert_eq!(fake.stops.load(Ordering::SeqCst), 1);
+    }
+
+    /// A failing `stop_scan` must leave the session active so the caller can retry,
+    /// instead of stranding a running adapter scan behind an inactive session.
+    struct FailingStop;
+
+    #[async_trait]
+    impl ScanControl for FailingStop {
+        async fn start_scan(&self, _filter: ScanFilter) -> btleplug::Result<()> {
+            Ok(())
+        }
+
+        async fn stop_scan(&self) -> btleplug::Result<()> {
+            Err(btleplug::Error::Other("stop failed".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn test_failed_stop_scan_keeps_owned_session_active() {
+        let session = ScanSession::new();
+        session
+            .begin(&FailingStop, ScanMode::Owned, ScanFilter::default())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            session.end(&FailingStop).await,
+            Err(Error::Bluetooth(_))
+        ));
+        assert_eq!(session.mode(), Some(ScanMode::Owned));
+
+        // Retrying against a working control stops cleanly.
+        let ok = FakeScan::default();
+        assert_eq!(session.end(&ok).await.unwrap(), Some(ScanMode::Owned));
+        assert_eq!(ok.stops.load(Ordering::SeqCst), 1);
     }
 
     #[test]

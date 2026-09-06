@@ -169,16 +169,7 @@ impl DeviceManager {
     /// [`shutdown`](Self::shutdown) will call `Adapter::stop_scan`. If the host
     /// application already runs a scan on this adapter, use [`attach`](Self::attach).
     pub async fn start_scanning(&self) -> Result<()> {
-        if self.is_running.load(Ordering::SeqCst) {
-            debug!("Already scanning");
-            return Ok(());
-        }
-
-        info!("Starting device manager scanning");
-
-        self.scanner.start_scanning().await?;
-        self.spawn_event_loop();
-        Ok(())
+        self.start_with(ScanMode::Owned).await
     }
 
     /// Attach to a scan the host application already started on this adapter.
@@ -187,15 +178,31 @@ impl DeviceManager {
     /// [`stop_scanning`](Self::stop_scanning) or [`shutdown`](Self::shutdown) stops
     /// event processing but never calls `Adapter::stop_scan`, so the host's scan keeps
     /// running. See [`ScanMode`] and [`scan_mode`](Self::scan_mode).
+    ///
+    /// Returns [`Error::ScanModeMismatch`](crate::Error::ScanModeMismatch) if this
+    /// manager already owns a scan started by [`start_scanning`](Self::start_scanning);
+    /// the reverse also holds.
     pub async fn attach(&self) -> Result<()> {
+        self.start_with(ScanMode::Attached).await
+    }
+
+    async fn start_with(&self, mode: ScanMode) -> Result<()> {
         if self.is_running.load(Ordering::SeqCst) {
             debug!("Already scanning");
             return Ok(());
         }
 
-        info!("Attaching device manager to host-owned scan");
+        match mode {
+            ScanMode::Owned => {
+                info!("Starting device manager scanning");
+                self.scanner.start_scanning().await?;
+            }
+            ScanMode::Attached => {
+                info!("Attaching device manager to host-owned scan");
+                self.scanner.attach().await?;
+            }
+        }
 
-        self.scanner.attach().await?;
         self.spawn_event_loop();
         Ok(())
     }
@@ -207,6 +214,10 @@ impl DeviceManager {
 
     /// Spawn the background task that turns scanner events into probe updates.
     fn spawn_event_loop(&self) {
+        if let Some(stale) = self.background_handle.write().take() {
+            // Only reachable if a previous stop failed mid-way; never run two loops.
+            stale.abort();
+        }
         self.is_running.store(true, Ordering::SeqCst);
 
         // Start background task to process discovery events
@@ -264,11 +275,14 @@ impl DeviceManager {
 
         info!("Stopping device manager scanning");
 
-        self.is_running.store(false, Ordering::SeqCst);
+        // Stop the scanner first: if `stop_scan` fails the scanner stays active and so
+        // do we, leaving a consistent state the caller can retry from.
         self.scanner.stop_scanning().await?;
+        self.is_running.store(false, Ordering::SeqCst);
 
         // Wait for background task
-        if let Some(handle) = self.background_handle.write().take() {
+        let previous = self.background_handle.write().take();
+        if let Some(handle) = previous {
             let _ = handle.await;
         }
 

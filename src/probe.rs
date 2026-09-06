@@ -496,21 +496,17 @@ impl Probe {
                                         food_safe_data.update_config(config.clone());
                                     } else {
                                         // Create new food safe data from external config/status
-                                        state.food_safe_data =
-                                            Some(FoodSafeData::from_config_and_status(
-                                                config.clone(),
-                                                fs_status.clone(),
-                                            ));
+                                        state.food_safe_data = Some(FoodSafeData::from_config_and_status(
+                                            config.clone(),
+                                            fs_status.clone(),
+                                        ));
                                     }
                                 }
                                 (Some(config), None) => {
                                     // Config but no status yet - create data with config only
                                     if state.food_safe_data.is_none() {
-                                        state.food_safe_data =
-                                            Some(FoodSafeData::with_config(config.clone()));
-                                    } else if let Some(ref mut food_safe_data) =
-                                        state.food_safe_data
-                                    {
+                                        state.food_safe_data = Some(FoodSafeData::with_config(config.clone()));
+                                    } else if let Some(ref mut food_safe_data) = state.food_safe_data {
                                         food_safe_data.update_config(config.clone());
                                     }
                                 }

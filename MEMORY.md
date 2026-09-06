@@ -36,6 +36,8 @@
 - [2026-09-05 21:30] @jameswanga: Feature Classification (unguided): new milestone "Shared Adapter Scan Ownership" (#2) with issues #8 (attach mode + ScanControl seam), #9 (Error::ScanInProgress, breaking → feat! → 0.2.0), #10 (start_scanning_with_filter + co-hosting docs).
 - [2026-09-05 21:40] @jameswanga: Issue #8 gate defaults: async fallible `attach()`, `ScanSession` state machine behind `ScanControl` trait (impl for Adapter) tested with a counting fake, `is_scanning()` true in both modes, `ScanMode` + `scan_mode()` exposed and re-exported. Implemented; 98 tests green.
 
+- [2026-09-05 22:00] @jameswanga: PR #11 review: fixed ScanSession dual-state, end() returns mode, ScanControl made pub(crate) (no re-export), DeviceManager start_with helper, reverted rustfmt churn in 5 unrelated files, test_ prefixes, README attach/scan_mode docs, Error::ScanModeMismatch on mode switch (breaking → feat!), tokio Mutex serializing begin/end, stop-failure keeps session active + handles joined/aborted before respawn. Dismissed: end-to-end `DeviceManager::attach → shutdown` test against a fake — BleScanner requires a real `Adapter` to construct, impossible without hardware; ScanSession tests cover the invariant and ScanControl is now private so no API surface leaks.
+
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->
 - [2026-09-05 19:40] @jameswanga: Release config inferred as `mode: single`, tag `v{version}`, manifest `Cargo.toml:[package].version`. First tag will adopt the manifest version (0.1.0).
