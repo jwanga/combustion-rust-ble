@@ -2,7 +2,7 @@
 name = "combustion-rust-ble"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.85"
 authors = ["James Wanga"]
 description = "Cross-platform Bluetooth Low Energy library for Combustion Inc Predictive Thermometer probes"
 documentation = "https://docs.rs/combustion-rust-ble"
@@ -20,7 +20,7 @@ exclude = [
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-btleplug = "0.11"
+btleplug = "0.13"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
 thiserror = "1"

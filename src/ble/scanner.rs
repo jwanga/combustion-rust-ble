@@ -252,6 +252,19 @@ impl BleScanner {
                     Self::process_peripheral(adapter, id, discovered, event_tx).await;
                 }
             }
+            CentralEvent::RssiUpdate { id, rssi } => {
+                // Only refresh probes we already know about; the RSSI is folded into the
+                // next `ProbeDiscoveryEvent` via `properties().rssi`.
+                if discovered.read().contains_key(&id.to_string()) {
+                    trace!("RSSI update for {:?}: {} dBm", id, rssi);
+                    Self::process_peripheral(adapter, id, discovered, event_tx).await;
+                }
+            }
+            CentralEvent::DeviceServicesModified(id) => {
+                // CoreBluetooth only. The GATT table changed; the next connect will
+                // rediscover services, so there is nothing to do here.
+                trace!("Device services modified: {:?}", id);
+            }
             CentralEvent::ServiceDataAdvertisement { .. } => {}
             CentralEvent::ServicesAdvertisement { .. } => {}
             CentralEvent::StateUpdate(_) => {}
