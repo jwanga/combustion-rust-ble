@@ -46,6 +46,8 @@
 - [2026-09-05 22:45] @jameswanga: PR #12 merged; issue #9 closed. (Note: a `git checkout main --` churn-trim briefly reverted device_manager.rs doc changes; restored before merge.)
 - [2026-09-05 22:55] @jameswanga: Issue #10 gate defaults: `start_scanning_with_filter(ScanFilter)` on manager + scanner, `start_scanning()` keeps empty filter (documented: probes matched on manufacturer data); co-hosting docs on `with_adapter` + README (owner and attached arrangements, other driver uses adapter().events()/peripheral()); example shows ScanInProgress → attach fallback.
 
+- [2026-09-05 23:10] @jameswanga: PR #13 review: introduced crate-private `ScanStart { Owned(ScanFilter), Attached }` so attach carries no dead filter and start_scanning delegates to start_scanning_with_filter; merged duplicated co-hosting/shared-scan docs into one section (rustdoc + README); corrected filter docs (all three backends honour service-UUID filters; ScanFilter has only `services`); added ScanFilter provenance note; rustdoc warning fixed (0 warnings).
+
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->
 - [2026-09-05 19:40] @jameswanga: Release config inferred as `mode: single`, tag `v{version}`, manifest `Cargo.toml:[package].version`. First tag will adopt the manifest version (0.1.0).

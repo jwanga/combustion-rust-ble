@@ -15,7 +15,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, Semaphore};
 use tracing::{debug, info, warn};
 
-use crate::ble::scanner::{BleScanner, ProbeDiscoveryEvent, ScanMode};
+use crate::ble::scanner::{BleScanner, ProbeDiscoveryEvent, ScanMode, ScanStart};
 use crate::error::Result;
 use crate::probe::{CallbackHandle, Probe};
 
@@ -101,37 +101,27 @@ impl DeviceManager {
     /// The manager does not touch the adapter until
     /// [`start_scanning`](Self::start_scanning) is called.
     ///
-    /// # Co-hosting with another BLE driver
+    /// # Sharing the adapter with another BLE driver
     ///
-    /// Two arrangements work, and both hinge on exactly one party calling
-    /// `start_scan` / `stop_scan`:
+    /// Scan state belongs to the adapter, not to this manager, so exactly one party
+    /// should call `start_scan` / `stop_scan`. Two arrangements work:
     ///
     /// 1. **This manager owns the scan.** Call [`start_scanning`](Self::start_scanning).
-    ///    Another crate (for example `fluke-connect-client`) can discover its own
-    ///    device by subscribing to `manager.adapter().events()`, look the peripheral up
-    ///    with `manager.adapter().peripheral(&id)`, and connect to it. Connections are
-    ///    independent of scan ownership, so that crate never needs to start or stop the
-    ///    scan; it must simply not call `stop_scan` on the shared adapter.
-    /// 2. **The host owns the scan.** Start it yourself with an empty
-    ///    [`ScanFilter`](btleplug::api::ScanFilter) (see
-    ///    [`start_scanning_with_filter`](Self::start_scanning_with_filter) for why),
-    ///    then call [`attach`](Self::attach). This manager only consumes events and
-    ///    never stops the scan.
+    ///    Another crate (for example `fluke-connect-client`) discovers its own device
+    ///    by subscribing to `manager.adapter().events()`, fetches the peripheral with
+    ///    `manager.adapter().peripheral(&id)`, and connects. Connecting does not touch
+    ///    scan state, so that crate needs no scan control; it must simply not call
+    ///    `stop_scan` on the shared adapter. Note that
+    ///    [`stop_scanning`](Self::stop_scanning) / [`shutdown`](Self::shutdown) end
+    ///    the scan for everyone.
+    /// 2. **The host owns the scan.** Start it yourself with an empty [`ScanFilter`]
+    ///    (see [`start_scanning_with_filter`](Self::start_scanning_with_filter) for
+    ///    why), then call [`attach`](Self::attach). This manager only consumes events
+    ///    and never stops the scan.
     ///
-    /// If you are unsure which applies, try `start_scanning()` and fall back to
-    /// `attach()` on [`Error::ScanInProgress`](crate::Error::ScanInProgress).
-    ///
-    /// # Shared scan state
-    ///
-    /// Scan state belongs to the adapter, not to this manager. `start_scanning` calls
-    /// `Adapter::start_scan` with an empty `ScanFilter` (replacing any filter the
-    /// application set), and `stop_scanning` / `shutdown` call `Adapter::stop_scan`,
-    /// which also ends any scan the application started on the same adapter. On BlueZ,
-    /// calling `start_scanning` while the application is already scanning returns
-    /// [`Error::ScanInProgress`](crate::Error::ScanInProgress). Coordinate scanning
-    /// through one owner: either let this manager drive the scan and read other
-    /// peripherals via [`adapter()`](Self::adapter), or keep the application's scan
-    /// and call [`attach`](Self::attach) so this manager only consumes events.
+    /// On BlueZ, `start_scanning` while the host is already scanning returns
+    /// [`Error::ScanInProgress`](crate::Error::ScanInProgress); the
+    /// [`start_scanning`](Self::start_scanning) docs show the `attach` fallback.
     ///
     /// # Example
     ///
@@ -203,8 +193,7 @@ impl DeviceManager {
     /// # }
     /// ```
     pub async fn start_scanning(&self) -> Result<()> {
-        self.start_with(ScanMode::Owned, ScanFilter::default())
-            .await
+        self.start_scanning_with_filter(ScanFilter::default()).await
     }
 
     /// Start scanning for probes with a caller-supplied [`ScanFilter`].
@@ -212,16 +201,22 @@ impl DeviceManager {
     /// [`start_scanning`](Self::start_scanning) always uses an **empty** filter, and
     /// starting a scan replaces whatever filter the host set on the adapter. That is
     /// deliberate: Combustion probes are matched on manufacturer data, not a service
-    /// UUID, so a service-UUID filter hides them on platforms that honour it (BlueZ,
-    /// Windows). Use this method only when the host needs a specific filter for other
-    /// devices sharing the scan and has confirmed probes are still delivered, or pass
-    /// a filter that only tunes non-UUID options.
+    /// UUID, and every supported backend (BlueZ, CoreBluetooth, Windows) drops
+    /// advertisements that do not carry one of the filtered service UUIDs. Use this
+    /// method only when the host needs a specific filter for other devices sharing the
+    /// scan and has confirmed probes are still delivered. `ScanFilter` currently
+    /// carries only service UUIDs, so an empty filter is equivalent to
+    /// `start_scanning()`.
+    ///
+    /// Build `filter` from the re-exported
+    /// [`combustion_rust_ble::btleplug::api::ScanFilter`](crate::btleplug::api::ScanFilter)
+    /// so the type matches the btleplug version this crate links against.
     ///
     /// # Errors
     ///
     /// Same as [`start_scanning`](Self::start_scanning).
     pub async fn start_scanning_with_filter(&self, filter: ScanFilter) -> Result<()> {
-        self.start_with(ScanMode::Owned, filter).await
+        self.start_with(ScanStart::Owned(filter)).await
     }
 
     /// Attach to a scan the host application already started on this adapter.
@@ -235,22 +230,21 @@ impl DeviceManager {
     /// manager already owns a scan started by [`start_scanning`](Self::start_scanning);
     /// the reverse also holds.
     pub async fn attach(&self) -> Result<()> {
-        self.start_with(ScanMode::Attached, ScanFilter::default())
-            .await
+        self.start_with(ScanStart::Attached).await
     }
 
-    async fn start_with(&self, mode: ScanMode, filter: ScanFilter) -> Result<()> {
+    async fn start_with(&self, start: ScanStart) -> Result<()> {
         if self.is_running.load(Ordering::SeqCst) {
             debug!("Already scanning");
             return Ok(());
         }
 
-        match mode {
-            ScanMode::Owned => {
+        match start {
+            ScanStart::Owned(filter) => {
                 info!("Starting device manager scanning");
                 self.scanner.start_scanning_with_filter(filter).await?;
             }
-            ScanMode::Attached => {
+            ScanStart::Attached => {
                 info!("Attaching device manager to host-owned scan");
                 self.scanner.attach().await?;
             }

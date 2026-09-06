@@ -15,8 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Adapter::stop_scan`.
 - `DeviceManager::start_scanning_with_filter(ScanFilter)` /
   `BleScanner::start_scanning_with_filter(ScanFilter)` for hosts that need a specific
-  adapter filter. `start_scanning()` keeps using an empty filter because Combustion
-  probes are matched on manufacturer data, not a service UUID.
+  adapter filter; `start_scanning()` keeps using an empty filter.
 - Documentation (crate docs and README) for co-hosting this manager with another BLE
   driver on one adapter, in both scan-owner and attached arrangements.
 - `ScanMode` (`Owned` | `Attached`) and `DeviceManager::scan_mode()` /

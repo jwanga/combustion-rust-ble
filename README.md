@@ -97,25 +97,24 @@ async fn run() -> Result<()> {
 ```
 
 Scan state lives on the adapter, so `start_scanning()` / `stop_scanning()` /
-`shutdown()` start and stop the adapter's scan for *everyone* sharing it.
-`start_scanning()` returns `Error::ScanInProgress` on BlueZ if the application
-is already scanning, so match on it and fall back to `attach()`. Let one owner
-drive the scan; other peripherals remain reachable through `manager.adapter()`.
+`shutdown()` start and stop the adapter's scan for *everyone* sharing it. Let
+one owner drive the scan:
 
-**Running alongside another BLE driver.** Let this manager own the scan and
-give the other crate (for example `fluke-connect-client`) the adapter: it can
-watch `manager.adapter().events()` for its device, fetch the peripheral with
-`manager.adapter().peripheral(&id)`, and connect. Connecting does not touch
-scan state, so the other crate needs no scan control at all; it only has to
-avoid calling `stop_scan` on the shared adapter. `start_scanning()` uses an
-empty `ScanFilter` on purpose: Combustion probes are matched on manufacturer
-data, not a service UUID, so a UUID filter would hide them. If your host needs
-a filter anyway, `start_scanning_with_filter(filter)` passes it through.
+- **This library owns it.** Call `start_scanning()`. Another crate (for example
+  `fluke-connect-client`) can watch `manager.adapter().events()` for its device,
+  fetch it with `manager.adapter().peripheral(&id)`, and connect. Connecting does
+  not touch scan state, so it needs no scan control and must only avoid calling
+  `stop_scan`. `start_scanning()` uses an empty `ScanFilter` on purpose (see the
+  `start_scanning_with_filter` docs for why); pass your own filter with
+  `start_scanning_with_filter(filter)` if your host needs one, building it from
+  `combustion_rust_ble::btleplug::api::ScanFilter` so the type matches.
+- **Your application owns it.** Start the scan yourself, then call
+  `manager.attach().await?`. The library only consumes events, and
+  `stop_scanning()` / `shutdown()` leave your scan running.
 
-If your application already runs the scan, call `manager.attach().await?`
-instead of `start_scanning()`. The library then only consumes events, and
-`stop_scanning()` / `shutdown()` leave the host's scan running.
-`manager.scan_mode()` reports `ScanMode::Owned` or `ScanMode::Attached`.
+`manager.scan_mode()` reports `ScanMode::Owned` or `ScanMode::Attached`. On
+BlueZ, `start_scanning()` returns `Error::ScanInProgress` if the application is
+already scanning, so match on it and fall back to `attach()`:
 
 ```rust
 use combustion_rust_ble::{DeviceManager, Error, Result};
