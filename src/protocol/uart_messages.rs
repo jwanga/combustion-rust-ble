@@ -532,7 +532,10 @@ mod tests {
     #[test]
     fn test_new_message_types() {
         // Test SetPowerMode
-        assert_eq!(UartMessageType::from_raw(0x09), UartMessageType::SetPowerMode);
+        assert_eq!(
+            UartMessageType::from_raw(0x09),
+            UartMessageType::SetPowerMode
+        );
         assert_eq!(
             UartMessageType::from_raw(0x89),
             UartMessageType::SetPowerModeResponse

@@ -548,9 +548,8 @@ impl FoodSafeStatus {
         let log_reduction = log_raw as f64 * 0.1;
 
         // Bits 11-26: Seconds above threshold (16 bits)
-        let seconds_raw = ((bytes[1] >> 3) as u16)
-            | ((bytes[2] as u16) << 5)
-            | ((bytes[3] & 0x07) as u16) << 13;
+        let seconds_raw =
+            ((bytes[1] >> 3) as u16) | ((bytes[2] as u16) << 5) | ((bytes[3] & 0x07) as u16) << 13;
         let seconds_above_threshold = seconds_raw as u32;
 
         // Bits 27-58: Sequence number (32 bits)
@@ -698,7 +697,9 @@ impl FoodSafeProduct {
     /// Convert to SimplifiedProduct for firmware configuration.
     pub fn to_simplified(&self) -> SimplifiedProduct {
         match self {
-            Self::ChickenBreast | Self::ChickenWhole | Self::Turkey => SimplifiedProduct::AnyPoultry,
+            Self::ChickenBreast | Self::ChickenWhole | Self::Turkey => {
+                SimplifiedProduct::AnyPoultry
+            }
             Self::BeefSteak | Self::BeefRoast => SimplifiedProduct::BeefCuts,
             Self::PorkChop | Self::PorkRoast => SimplifiedProduct::PorkCuts,
             Self::GroundBeef | Self::GroundPork => SimplifiedProduct::GroundMeats,
@@ -946,9 +947,15 @@ mod tests {
         assert_eq!(SimplifiedProduct::from_raw(100), None);
 
         // Check safe temperatures
-        assert_eq!(SimplifiedProduct::AnyPoultry.safe_temperature_celsius(), 74.0);
+        assert_eq!(
+            SimplifiedProduct::AnyPoultry.safe_temperature_celsius(),
+            74.0
+        );
         assert_eq!(SimplifiedProduct::BeefCuts.safe_temperature_celsius(), 63.0);
-        assert_eq!(SimplifiedProduct::GroundMeats.safe_temperature_celsius(), 71.0);
+        assert_eq!(
+            SimplifiedProduct::GroundMeats.safe_temperature_celsius(),
+            71.0
+        );
     }
 
     #[test]
@@ -1019,7 +1026,8 @@ mod tests {
 
     #[test]
     fn test_food_safe_config_simplified() {
-        let config = FoodSafeConfig::simplified(SimplifiedProduct::AnyPoultry, Serving::ServedImmediately);
+        let config =
+            FoodSafeConfig::simplified(SimplifiedProduct::AnyPoultry, Serving::ServedImmediately);
         assert_eq!(config.mode, FoodSafeMode::Simplified);
         assert_eq!(config.product, SimplifiedProduct::AnyPoultry.to_raw());
         assert_eq!(config.threshold_temperature, 74.0); // Poultry safe temp
@@ -1034,7 +1042,7 @@ mod tests {
         // Combined: 0b_0111000_001 = 0x1C1 in first two bytes
         bytes[0] = 0b00111001; // State=1 (bits 0-2), log_red low bits (bits 3-7)
         bytes[1] = 0b00000001; // log_red high bits (bits 0-2), seconds low (bits 3-7)
-        // Rest zeroed for simplicity
+                               // Rest zeroed for simplicity
 
         let status = FoodSafeStatus::from_bytes(&bytes).expect("should parse");
         assert_eq!(status.state, FoodSafeState::Safe);

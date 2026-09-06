@@ -14,7 +14,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, Semaphore};
 use tracing::{debug, info, warn};
 
-use crate::ble::scanner::{BleScanner, ProbeDiscoveryEvent};
+use crate::ble::scanner::{BleScanner, ProbeDiscoveryEvent, ScanMode};
 use crate::error::Result;
 use crate::probe::{CallbackHandle, Probe};
 
@@ -163,7 +163,11 @@ impl DeviceManager {
         self.scanner.adapter()
     }
 
-    /// Initialize Bluetooth and start scanning for probes.
+    /// Start scanning for probes, owning the adapter scan.
+    ///
+    /// Calls `Adapter::start_scan`; [`stop_scanning`](Self::stop_scanning) and
+    /// [`shutdown`](Self::shutdown) will call `Adapter::stop_scan`. If the host
+    /// application already runs a scan on this adapter, use [`attach`](Self::attach).
     pub async fn start_scanning(&self) -> Result<()> {
         if self.is_running.load(Ordering::SeqCst) {
             debug!("Already scanning");
@@ -173,6 +177,36 @@ impl DeviceManager {
         info!("Starting device manager scanning");
 
         self.scanner.start_scanning().await?;
+        self.spawn_event_loop();
+        Ok(())
+    }
+
+    /// Attach to a scan the host application already started on this adapter.
+    ///
+    /// Processes discovery events **without** calling `Adapter::start_scan`. A later
+    /// [`stop_scanning`](Self::stop_scanning) or [`shutdown`](Self::shutdown) stops
+    /// event processing but never calls `Adapter::stop_scan`, so the host's scan keeps
+    /// running. See [`ScanMode`] and [`scan_mode`](Self::scan_mode).
+    pub async fn attach(&self) -> Result<()> {
+        if self.is_running.load(Ordering::SeqCst) {
+            debug!("Already scanning");
+            return Ok(());
+        }
+
+        info!("Attaching device manager to host-owned scan");
+
+        self.scanner.attach().await?;
+        self.spawn_event_loop();
+        Ok(())
+    }
+
+    /// How the current scan was started, or `None` when not scanning.
+    pub fn scan_mode(&self) -> Option<ScanMode> {
+        self.scanner.scan_mode()
+    }
+
+    /// Spawn the background task that turns scanner events into probe updates.
+    fn spawn_event_loop(&self) {
         self.is_running.store(true, Ordering::SeqCst);
 
         // Start background task to process discovery events
@@ -216,11 +250,13 @@ impl DeviceManager {
         });
 
         *self.background_handle.write() = Some(handle);
-
-        Ok(())
     }
 
-    /// Stop scanning for probes.
+    /// Stop processing scan events.
+    ///
+    /// Calls `Adapter::stop_scan` only when this manager owns the scan
+    /// ([`ScanMode::Owned`]); after [`attach`](Self::attach) the host's scan is left
+    /// running.
     pub async fn stop_scanning(&self) -> Result<()> {
         if !self.is_running.load(Ordering::SeqCst) {
             return Ok(());

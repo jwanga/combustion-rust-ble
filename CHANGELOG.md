@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `DeviceManager::attach()` / `BleScanner::attach()` — process discovery events on a
+  scan the host application already runs, without calling `Adapter::start_scan`.
+  `stop_scanning` / `shutdown` after `attach` stop event processing but never call
+  `Adapter::stop_scan`.
+- `ScanMode` (`Owned` | `Attached`) and `DeviceManager::scan_mode()` /
+  `BleScanner::scan_mode()` to report how the current scan was started.
+- `ScanControl` trait over the adapter's `start_scan` / `stop_scan` calls, implemented
+  for `btleplug::platform::Adapter`, so scan-ownership logic is testable without
+  hardware.
+
 ## [0.1.0] - 2026-09-05
 
 ### Added
