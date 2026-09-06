@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Adapter::stop_scan`.
 - `ScanMode` (`Owned` | `Attached`) and `DeviceManager::scan_mode()` /
   `BleScanner::scan_mode()` to report how the current scan was started.
+- `Error::ScanInProgress`, returned by `start_scanning` when the platform reports a
+  scan already running on the adapter (BlueZ `org.bluez.Error.InProgress`), so hosts
+  can fall back to `attach` without string-matching the BlueZ error. **Breaking:**
+  exhaustive `match` arms on `Error` need a new arm (see `Error::ScanModeMismatch`
+  below).
 - `Error::ScanModeMismatch { current, requested }`, returned when `attach` is called
   on a manager that owns its scan or vice versa. **Breaking:** `Error` is not
   `#[non_exhaustive]`, so exhaustive `match` arms on `Error` must add a handler.

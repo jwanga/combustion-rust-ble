@@ -107,10 +107,10 @@ impl DeviceManager {
     /// application set), and `stop_scanning` / `shutdown` call `Adapter::stop_scan`,
     /// which also ends any scan the application started on the same adapter. On BlueZ,
     /// calling `start_scanning` while the application is already scanning returns
-    /// `Error::Bluetooth` (`InProgress`). Coordinate scanning through one owner: either
-    /// let this manager drive the scan and read other peripherals via
-    /// [`adapter()`](Self::adapter), or stop the application's scan before calling
-    /// `start_scanning`.
+    /// [`Error::ScanInProgress`](crate::Error::ScanInProgress). Coordinate scanning
+    /// through one owner: either let this manager drive the scan and read other
+    /// peripherals via [`adapter()`](Self::adapter), or keep the application's scan
+    /// and call [`attach`](Self::attach) so this manager only consumes events.
     ///
     /// # Example
     ///
@@ -167,7 +167,20 @@ impl DeviceManager {
     ///
     /// Calls `Adapter::start_scan`; [`stop_scanning`](Self::stop_scanning) and
     /// [`shutdown`](Self::shutdown) will call `Adapter::stop_scan`. If the host
-    /// application already runs a scan on this adapter, use [`attach`](Self::attach).
+    /// application already runs a scan on this adapter, this returns
+    /// [`Error::ScanInProgress`](crate::Error::ScanInProgress) (BlueZ) — use
+    /// [`attach`](Self::attach) instead:
+    ///
+    /// ```rust,no_run
+    /// # use combustion_rust_ble::{DeviceManager, Error, Result};
+    /// # async fn run(manager: &DeviceManager) -> Result<()> {
+    /// match manager.start_scanning().await {
+    ///     Err(Error::ScanInProgress) => manager.attach().await?,
+    ///     other => other?,
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn start_scanning(&self) -> Result<()> {
         self.start_with(ScanMode::Owned).await
     }

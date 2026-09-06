@@ -97,15 +97,26 @@ async fn run() -> Result<()> {
 ```
 
 Scan state lives on the adapter, so `start_scanning()` / `stop_scanning()` /
-`shutdown()` start and stop the adapter's scan for *everyone* sharing it, and
-`start_scanning()` fails on BlueZ if the application is already scanning. Let
-one owner drive the scan; other peripherals remain reachable through
-`manager.adapter()`.
+`shutdown()` start and stop the adapter's scan for *everyone* sharing it.
+`start_scanning()` returns `Error::ScanInProgress` on BlueZ if the application
+is already scanning, so match on it and fall back to `attach()`. Let one owner
+drive the scan; other peripherals remain reachable through `manager.adapter()`.
 
 If your application already runs the scan, call `manager.attach().await?`
 instead of `start_scanning()`. The library then only consumes events, and
 `stop_scanning()` / `shutdown()` leave the host's scan running.
 `manager.scan_mode()` reports `ScanMode::Owned` or `ScanMode::Attached`.
+
+```rust
+use combustion_rust_ble::{DeviceManager, Error, Result};
+
+async fn start(manager: &DeviceManager) -> Result<()> {
+    match manager.start_scanning().await {
+        Err(Error::ScanInProgress) => manager.attach().await,
+        other => other,
+    }
+}
+```
 
 ## Examples
 
