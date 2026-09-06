@@ -19,8 +19,10 @@ tag="${1:-${GITHUB_REF_NAME:-$(git describe --tags --exact-match 2>/dev/null || 
 [[ "$tag" == v* ]] || die "tag '$tag' does not start with 'v'"
 tag_version="${tag#v}"
 
-crate="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].name')"
-manifest_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+read -r crate manifest_version < <(
+  cargo metadata --no-deps --format-version 1 \
+    | jq -r '.packages[0] | "\(.name) \(.version)"'
+)
 [[ "$tag_version" == "$manifest_version" ]] \
   || die "tag version $tag_version does not match Cargo.toml version $manifest_version"
 

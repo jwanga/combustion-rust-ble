@@ -13,6 +13,9 @@ categories = ["hardware-support", "api-bindings"]
 exclude = [
     ".github/",
     "tests/",
+    "MEMORY.md",
+    "INSTRUCTIONS.md",
+    "release.sh",
 ]
 
 [badges]

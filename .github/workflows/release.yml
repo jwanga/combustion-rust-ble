@@ -1,8 +1,9 @@
 name: Release
 
 # Publishes the crate to crates.io whenever a release tag (v<semver>) is pushed.
-# Tags are created by the engineering-plugin /release skill, which has already
-# synced Cargo.toml's version and created the GitHub Release.
+# Tags are pushed by the engineering-plugin /release skill after it has synced
+# Cargo.toml's version; the GitHub Release is created immediately after the
+# tag push, so it may not exist yet when this job starts. Nothing here needs it.
 on:
   push:
     tags:
@@ -31,6 +32,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
 
       - name: Publish
-        run: ./release.sh "${GITHUB_REF_NAME}"
+        # release.sh reads the tag from $GITHUB_REF_NAME.
+        run: ./release.sh
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

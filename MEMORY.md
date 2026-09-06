@@ -24,6 +24,8 @@
 - [2026-09-05 20:25] @jameswanga: PR #6 approved and merged; issue #3 closed.
 - [2026-09-05 20:35] @jameswanga: Issue #4: gate defaults accepted (release.sh verifies tag==manifest version, idempotent via crates.io lookup, `cargo publish --locked`; workflow on `v*` tags, ubuntu + libdbus-1-dev; .github/release.yml label categories). Fixed Cargo.toml repository URL to jwanga, dropped redundant `readme` key, folded the never-published placeholder `[0.1.0] - 2024-XX-XX` CHANGELOG section into `[Unreleased]` so the first `/release` produces one 0.1.0 heading.
 
+- [2026-09-05 20:45] @jameswanga: PR #7 review: single cargo metadata call, workflow relies on GITHUB_REF_NAME default, created `breaking`/`skip-changelog` labels, excluded MEMORY.md/INSTRUCTIONS.md/release.sh from the crate tarball, corrected workflow header comment (all Important, fixed).
+
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->
 - [2026-09-05 19:40] @jameswanga: Release config inferred as `mode: single`, tag `v{version}`, manifest `Cargo.toml:[package].version`. First tag will adopt the manifest version (0.1.0).
