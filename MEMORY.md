@@ -2,8 +2,8 @@
 
 ## Current State
 - **Active Milestone**: Shared Adapter Scan Ownership (#2)
-- **Current Issue**: #8 attach mode
-- **Current Branch**: issue-8-attach-mode
+- **Current Issue**: #9 ScanInProgress
+- **Current Branch**: issue-9-scan-in-progress
 - **Plugin Version**: 1.3.0
 
 ## Progress Log
@@ -37,6 +37,9 @@
 - [2026-09-05 21:40] @jameswanga: Issue #8 gate defaults: async fallible `attach()`, `ScanSession` state machine behind `ScanControl` trait (impl for Adapter) tested with a counting fake, `is_scanning()` true in both modes, `ScanMode` + `scan_mode()` exposed and re-exported. Implemented; 98 tests green.
 
 - [2026-09-05 22:00] @jameswanga: PR #11 review: fixed ScanSession dual-state, end() returns mode, ScanControl made pub(crate) (no re-export), DeviceManager start_with helper, reverted rustfmt churn in 5 unrelated files, test_ prefixes, README attach/scan_mode docs, Error::ScanModeMismatch on mode switch (breaking → feat!), tokio Mutex serializing begin/end, stop-failure keeps session active + handles joined/aborted before respawn. Dismissed: end-to-end `DeviceManager::attach → shutdown` test against a fake — BleScanner requires a real `Adapter` to construct, impossible without hardware; ScanSession tests cover the invariant and ScanControl is now private so no API surface leaks.
+
+- [2026-09-05 22:10] @jameswanga: PR #11 merged; issue #8 closed.
+- [2026-09-05 22:20] @jameswanga: Issue #9 gate defaults: map on message markers ("already in progress", "InProgress") because dbus::Error Display omits the D-Bus error name; mapping lives in ScanSession::begin so all owned-start paths share it; fake-adapter tests for the mapping and the attach fallback.
 
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->

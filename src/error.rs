@@ -116,6 +116,15 @@ pub enum Error {
         uuid: String,
     },
 
+    /// The platform reports that a scan is already running on this adapter.
+    ///
+    /// Returned by `start_scanning` when another party (typically the host
+    /// application) owns the adapter scan — on BlueZ this is
+    /// `org.bluez.Error.InProgress`. Fall back to `attach` to consume the existing
+    /// scan instead of owning one.
+    #[error("A scan is already in progress on this adapter; use attach()")]
+    ScanInProgress,
+
     /// Scanning is already active in a different [`ScanMode`](crate::ScanMode).
     ///
     /// Returned when `attach` is called on a manager that owns its scan, or

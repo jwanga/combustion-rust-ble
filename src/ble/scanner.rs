@@ -66,6 +66,24 @@ impl ScanControl for Adapter {
     }
 }
 
+/// Substrings that identify BlueZ's `org.bluez.Error.InProgress` reply to
+/// `StartDiscovery` once it has passed through `dbus` → `bluez-async` → btleplug.
+/// The D-Bus error *name* is not part of the display string, only the message
+/// ("Operation already in progress"), so both spellings are checked.
+const SCAN_IN_PROGRESS_MARKERS: &[&str] = &["already in progress", "InProgress"];
+
+/// Map a `start_scan` failure to [`Error::ScanInProgress`] when the platform reports
+/// that a scan is already running on the adapter; everything else stays
+/// [`Error::Bluetooth`].
+fn map_start_scan_error(err: btleplug::Error) -> Error {
+    let msg = err.to_string();
+    if SCAN_IN_PROGRESS_MARKERS.iter().any(|m| msg.contains(m)) {
+        Error::ScanInProgress
+    } else {
+        Error::Bluetooth(err)
+    }
+}
+
 /// Owner-vs-attached scan state machine.
 ///
 /// Kept separate from [`BleScanner`] so the "never call `stop_scan` in attached
@@ -127,7 +145,10 @@ impl ScanSession {
             None => {}
         }
         if mode == ScanMode::Owned {
-            control.start_scan(filter).await.map_err(Error::Bluetooth)?;
+            control
+                .start_scan(filter)
+                .await
+                .map_err(map_start_scan_error)?;
         }
         *self.mode.write() = Some(mode);
         Ok(true)
@@ -218,7 +239,10 @@ impl BleScanner {
     ///
     /// # Errors
     ///
-    /// Returns an error if scanning cannot be started.
+    /// Returns [`Error::ScanInProgress`] if the platform reports that a scan is already
+    /// running on this adapter (BlueZ `org.bluez.Error.InProgress`); fall back to
+    /// [`attach`](Self::attach) in that case. Any other failure is
+    /// [`Error::Bluetooth`].
     pub async fn start_scanning(&self) -> Result<()> {
         self.start_with(ScanMode::Owned, ScanFilter::default())
             .await
@@ -571,6 +595,68 @@ mod tests {
 
         assert_eq!(fake.starts.load(Ordering::SeqCst), 1);
         assert_eq!(fake.stops.load(Ordering::SeqCst), 1);
+    }
+
+    /// Fake whose `start_scan` fails the way btleplug's BlueZ backend does when the
+    /// host is already discovering: `Error::Other` wrapping a D-Bus error whose display
+    /// string is just the message.
+    struct HostAlreadyScanning;
+
+    #[async_trait]
+    impl ScanControl for HostAlreadyScanning {
+        async fn start_scan(&self, _filter: ScanFilter) -> btleplug::Result<()> {
+            Err(btleplug::Error::Other(
+                "Operation already in progress".into(),
+            ))
+        }
+
+        async fn stop_scan(&self) -> btleplug::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_start_scan_in_progress_maps_to_scan_in_progress() {
+        let session = ScanSession::new();
+        let result = session
+            .begin(&HostAlreadyScanning, ScanMode::Owned, ScanFilter::default())
+            .await;
+        assert!(matches!(result, Err(Error::ScanInProgress)));
+        // The session must not have been activated.
+        assert!(!session.is_active());
+
+        // Attaching afterwards works, which is the intended fallback.
+        assert!(session
+            .begin(
+                &HostAlreadyScanning,
+                ScanMode::Attached,
+                ScanFilter::default()
+            )
+            .await
+            .unwrap());
+        assert_eq!(session.mode(), Some(ScanMode::Attached));
+    }
+
+    #[test]
+    fn test_map_start_scan_error_only_matches_in_progress() {
+        assert!(matches!(
+            map_start_scan_error(btleplug::Error::Other("org.bluez.Error.InProgress".into())),
+            Error::ScanInProgress
+        ));
+        assert!(matches!(
+            map_start_scan_error(btleplug::Error::Other(
+                "Operation already in progress".into()
+            )),
+            Error::ScanInProgress
+        ));
+        assert!(matches!(
+            map_start_scan_error(btleplug::Error::Other("Resource Not Ready".into())),
+            Error::Bluetooth(_)
+        ));
+        assert!(matches!(
+            map_start_scan_error(btleplug::Error::PermissionDenied),
+            Error::Bluetooth(_)
+        ));
     }
 
     /// A failing `stop_scan` must leave the session active so the caller can retry,
