@@ -31,7 +31,10 @@ async fn main() -> Result<()> {
         .into_iter()
         .next()
         .ok_or(Error::BluetoothUnavailable)?;
-    println!("Application adapter: {:?}", adapter.adapter_info().await.ok());
+    println!(
+        "Application adapter: {:?}",
+        adapter.adapter_info().await.ok()
+    );
 
     // ...and lends the adapter to combustion-rust-ble.
     let manager = DeviceManager::with_adapter(adapter);
