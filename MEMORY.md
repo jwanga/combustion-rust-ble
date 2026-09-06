@@ -2,8 +2,8 @@
 
 ## Current State
 - **Active Milestone**: Shared Adapter Scan Ownership (#2)
-- **Current Issue**: #10 filter + co-hosting docs
-- **Current Branch**: issue-10-filter-and-docs
+- **Current Issue**: None
+- **Current Branch**: main
 - **Plugin Version**: 1.3.0
 
 ## Progress Log
@@ -47,6 +47,9 @@
 - [2026-09-05 22:55] @jameswanga: Issue #10 gate defaults: `start_scanning_with_filter(ScanFilter)` on manager + scanner, `start_scanning()` keeps empty filter (documented: probes matched on manufacturer data); co-hosting docs on `with_adapter` + README (owner and attached arrangements, other driver uses adapter().events()/peripheral()); example shows ScanInProgress → attach fallback.
 
 - [2026-09-05 23:10] @jameswanga: PR #13 review: introduced crate-private `ScanStart { Owned(ScanFilter), Attached }` so attach carries no dead filter and start_scanning delegates to start_scanning_with_filter; merged duplicated co-hosting/shared-scan docs into one section (rustdoc + README); corrected filter docs (all three backends honour service-UUID filters; ScanFilter has only `services`); added ScanFilter provenance note; rustdoc warning fixed (0 warnings).
+
+- [2026-09-05 23:15] @jameswanga: PR #13 merged; issue #10 closed. All Shared Adapter Scan Ownership issues done.
+- [2026-09-05 23:20] @jameswanga: Refreshed architecture diagram (trigger: issue-close #8 #9 #10, diagram type: flowchart; targeted update of AUTO sections for ScanSession/scan modes and new Error variants rather than full regeneration)
 
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->
