@@ -2,8 +2,8 @@
 
 ## Current State
 - **Active Milestone**: Release Readiness
-- **Current Issue**: #3 Init from existing Adapter
-- **Current Branch**: issue-3-with-adapter
+- **Current Issue**: #4 crates.io publishing
+- **Current Branch**: issue-4-crates-io-publish
 - **Plugin Version**: 1.3.0
 
 ## Progress Log
@@ -21,10 +21,13 @@
 
 - [2026-09-05 20:20] @jameswanga: PR #6 review: dedup BleScanner::new via with_adapter (Important, fixed); documented shared-scan hazard on with_adapter/README/example (Important, fixed); getter doc wording + rustfmt on example (Important, fixed).
 
+- [2026-09-05 20:25] @jameswanga: PR #6 approved and merged; issue #3 closed.
+- [2026-09-05 20:35] @jameswanga: Issue #4: gate defaults accepted (release.sh verifies tag==manifest version, idempotent via crates.io lookup, `cargo publish --locked`; workflow on `v*` tags, ubuntu + libdbus-1-dev; .github/release.yml label categories). Fixed Cargo.toml repository URL to jwanga, dropped redundant `readme` key, folded the never-published placeholder `[0.1.0] - 2024-XX-XX` CHANGELOG section into `[Unreleased]` so the first `/release` produces one 0.1.0 heading.
+
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->
 - [2026-09-05 19:40] @jameswanga: Release config inferred as `mode: single`, tag `v{version}`, manifest `Cargo.toml:[package].version`. First tag will adopt the manifest version (0.1.0).
 
 ## Notes
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->
-- [2026-09-05 19:40] @jameswanga: Cargo.toml `repository` pointed at combustion-inc org, not jwanga; to be corrected in issue #4 (crates.io publishing).
+- [2026-09-05 19:40] @jameswanga: Cargo.toml `repository` pointed at combustion-inc org, not jwanga; corrected in issue #4 (crates.io publishing).
