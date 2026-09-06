@@ -22,8 +22,7 @@ use crate::error::{Error, Result};
 const STALE_DBUS_MARKERS: &[&str] = &["doesn't exist", "UnknownObject", "No such interface"];
 
 fn is_stale_dbus_error(err: &btleplug::Error) -> bool {
-    let msg = err.to_string();
-    STALE_DBUS_MARKERS.iter().any(|m| msg.contains(m))
+    crate::ble::btleplug_error_matches(err, STALE_DBUS_MARKERS)
 }
 
 /// Notification event from a characteristic.

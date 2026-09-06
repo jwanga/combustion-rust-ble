@@ -76,8 +76,7 @@ const SCAN_IN_PROGRESS_MARKERS: &[&str] = &["already in progress", "InProgress"]
 /// that a scan is already running on the adapter; everything else stays
 /// [`Error::Bluetooth`].
 fn map_start_scan_error(err: btleplug::Error) -> Error {
-    let msg = err.to_string();
-    if SCAN_IN_PROGRESS_MARKERS.iter().any(|m| msg.contains(m)) {
+    if crate::ble::btleplug_error_matches(&err, SCAN_IN_PROGRESS_MARKERS) {
         Error::ScanInProgress
     } else {
         Error::Bluetooth(err)

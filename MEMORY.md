@@ -41,6 +41,8 @@
 - [2026-09-05 22:10] @jameswanga: PR #11 merged; issue #8 closed.
 - [2026-09-05 22:20] @jameswanga: Issue #9 gate defaults: map on message markers ("already in progress", "InProgress") because dbus::Error Display omits the D-Bus error name; mapping lives in ScanSession::begin so all owned-start paths share it; fake-adapter tests for the mapping and the attach fallback.
 
+- [2026-09-05 22:35] @jameswanga: PR #12 review: hoisted btleplug error-marker matching into `ble::btleplug_error_matches` (shared with characteristics.rs); README now names Error::ScanInProgress with a fallback snippet; CHANGELOG cross-ref fixed. Correctness reviewer verified the BlueZ error chain end to end; no findings.
+
 ## Key Decisions
 <!-- Each entry MUST use the format: [YYYY-MM-DD HH:MM] @username: description -->
 - [2026-09-05 19:40] @jameswanga: Release config inferred as `mode: single`, tag `v{version}`, manifest `Cargo.toml:[package].version`. First tag will adopt the manifest version (0.1.0).
