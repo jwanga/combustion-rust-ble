@@ -97,15 +97,24 @@ async fn run() -> Result<()> {
 ```
 
 Scan state lives on the adapter, so `start_scanning()` / `stop_scanning()` /
-`shutdown()` start and stop the adapter's scan for *everyone* sharing it.
-`start_scanning()` returns `Error::ScanInProgress` on BlueZ if the application
-is already scanning, so match on it and fall back to `attach()`. Let one owner
-drive the scan; other peripherals remain reachable through `manager.adapter()`.
+`shutdown()` start and stop the adapter's scan for *everyone* sharing it. Let
+one owner drive the scan:
 
-If your application already runs the scan, call `manager.attach().await?`
-instead of `start_scanning()`. The library then only consumes events, and
-`stop_scanning()` / `shutdown()` leave the host's scan running.
-`manager.scan_mode()` reports `ScanMode::Owned` or `ScanMode::Attached`.
+- **This library owns it.** Call `start_scanning()`. Another crate (for example
+  `fluke-connect-client`) can watch `manager.adapter().events()` for its device,
+  fetch it with `manager.adapter().peripheral(&id)`, and connect. Connecting does
+  not touch scan state, so it needs no scan control and must only avoid calling
+  `stop_scan`. `start_scanning()` uses an empty `ScanFilter` on purpose (see the
+  `start_scanning_with_filter` docs for why); pass your own filter with
+  `start_scanning_with_filter(filter)` if your host needs one, building it from
+  `combustion_rust_ble::btleplug::api::ScanFilter` so the type matches.
+- **Your application owns it.** Start the scan yourself, then call
+  `manager.attach().await?`. The library only consumes events, and
+  `stop_scanning()` / `shutdown()` leave your scan running.
+
+`manager.scan_mode()` reports `ScanMode::Owned` or `ScanMode::Attached`. On
+BlueZ, `start_scanning()` returns `Error::ScanInProgress` if the application is
+already scanning, so match on it and fall back to `attach()`:
 
 ```rust
 use combustion_rust_ble::{DeviceManager, Error, Result};
@@ -225,7 +234,8 @@ async fn main() -> Result<()> {
     manager.adapter();                   // Access the underlying btleplug Adapter
 
     // Scanning
-    manager.start_scanning().await?;    // Own the adapter scan
+    manager.start_scanning().await?;    // Own the adapter scan (empty ScanFilter)
+    manager.start_scanning_with_filter(filter).await?; // ...with a host-chosen filter
     manager.attach().await?;            // ...or join a scan the host already runs
     manager.scan_mode();                // Some(ScanMode::Owned | Attached) while active
     manager.stop_scanning().await?;     // Calls stop_scan only in Owned mode

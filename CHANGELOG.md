@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scan the host application already runs, without calling `Adapter::start_scan`.
   `stop_scanning` / `shutdown` after `attach` stop event processing but never call
   `Adapter::stop_scan`.
+- `DeviceManager::start_scanning_with_filter(ScanFilter)` /
+  `BleScanner::start_scanning_with_filter(ScanFilter)` for hosts that need a specific
+  adapter filter; `start_scanning()` keeps using an empty filter.
+- Documentation (crate docs and README) for co-hosting this manager with another BLE
+  driver on one adapter, in both scan-owner and attached arrangements.
 - `ScanMode` (`Owned` | `Attached`) and `DeviceManager::scan_mode()` /
   `BleScanner::scan_mode()` to report how the current scan was started.
 - `Error::ScanInProgress`, returned by `start_scanning` when the platform reports a

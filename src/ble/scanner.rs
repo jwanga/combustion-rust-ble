@@ -45,6 +45,25 @@ pub enum ScanMode {
     Attached,
 }
 
+/// How to start a scan session: own the adapter scan with a filter, or attach to one
+/// the host already runs. Carries the filter only where it is used.
+#[derive(Debug, Clone)]
+pub(crate) enum ScanStart {
+    /// Call `Adapter::start_scan(filter)` and own the scan.
+    Owned(ScanFilter),
+    /// Do not touch the adapter; only consume events.
+    Attached,
+}
+
+impl ScanStart {
+    fn mode(&self) -> ScanMode {
+        match self {
+            ScanStart::Owned(_) => ScanMode::Owned,
+            ScanStart::Attached => ScanMode::Attached,
+        }
+    }
+}
+
 /// The adapter-level scan calls, abstracted so ownership logic can be unit-tested
 /// without Bluetooth hardware.
 #[async_trait]
@@ -126,13 +145,9 @@ impl ScanSession {
     /// [`ScanMode::Attached`] the adapter is not touched. Returns `Ok(false)` if the
     /// session was already active in the same mode (no adapter call is made), and
     /// [`Error::ScanModeMismatch`] if it is active in the other mode.
-    async fn begin(
-        &self,
-        control: &dyn ScanControl,
-        mode: ScanMode,
-        filter: ScanFilter,
-    ) -> Result<bool> {
+    async fn begin(&self, control: &dyn ScanControl, start: ScanStart) -> Result<bool> {
         let _guard = self.transition.lock().await;
+        let mode = start.mode();
         match self.mode() {
             Some(current) if current == mode => return Ok(false),
             Some(current) => {
@@ -143,7 +158,7 @@ impl ScanSession {
             }
             None => {}
         }
-        if mode == ScanMode::Owned {
+        if let ScanStart::Owned(filter) = start {
             control
                 .start_scan(filter)
                 .await
@@ -243,8 +258,19 @@ impl BleScanner {
     /// [`attach`](Self::attach) in that case. Any other failure is
     /// [`Error::Bluetooth`].
     pub async fn start_scanning(&self) -> Result<()> {
-        self.start_with(ScanMode::Owned, ScanFilter::default())
-            .await
+        self.start_scanning_with_filter(ScanFilter::default()).await
+    }
+
+    /// Start scanning for probes with a caller-supplied [`ScanFilter`].
+    ///
+    /// Same caveats as
+    /// [`DeviceManager::start_scanning_with_filter`](crate::DeviceManager::start_scanning_with_filter).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`start_scanning`](Self::start_scanning).
+    pub async fn start_scanning_with_filter(&self, filter: ScanFilter) -> Result<()> {
+        self.start_with(ScanStart::Owned(filter)).await
     }
 
     /// Attach to a scan the host application already started on this adapter.
@@ -258,14 +284,14 @@ impl BleScanner {
     /// Returns [`Error::ScanModeMismatch`] if this scanner already owns a scan it
     /// started via [`start_scanning`](Self::start_scanning).
     pub async fn attach(&self) -> Result<()> {
-        self.start_with(ScanMode::Attached, ScanFilter::default())
-            .await
+        self.start_with(ScanStart::Attached).await
     }
 
     /// Shared start path. Any previous event loop is joined before a new one is
     /// spawned so a failed stop cannot leave two loops feeding the same channels.
-    async fn start_with(&self, mode: ScanMode, filter: ScanFilter) -> Result<()> {
-        if !self.session.begin(&self.adapter, mode, filter).await? {
+    async fn start_with(&self, start: ScanStart) -> Result<()> {
+        let mode = start.mode();
+        if !self.session.begin(&self.adapter, start).await? {
             debug!("Already scanning, ignoring start request");
             return Ok(());
         }
@@ -539,10 +565,7 @@ mod tests {
         let fake = FakeScan::default();
         let session = ScanSession::new();
 
-        assert!(session
-            .begin(&fake, ScanMode::Attached, ScanFilter::default())
-            .await
-            .unwrap());
+        assert!(session.begin(&fake, ScanStart::Attached).await.unwrap());
         assert_eq!(session.mode(), Some(ScanMode::Attached));
         assert!(session.is_active());
 
@@ -568,19 +591,17 @@ mod tests {
         let session = ScanSession::new();
 
         assert!(session
-            .begin(&fake, ScanMode::Owned, ScanFilter::default())
+            .begin(&fake, ScanStart::Owned(ScanFilter::default()))
             .await
             .unwrap());
         // Second begin in the same mode is a no-op and does not touch the adapter.
         assert!(!session
-            .begin(&fake, ScanMode::Owned, ScanFilter::default())
+            .begin(&fake, ScanStart::Owned(ScanFilter::default()))
             .await
             .unwrap());
         // Switching mode while active is rejected rather than silently ignored.
         assert!(matches!(
-            session
-                .begin(&fake, ScanMode::Attached, ScanFilter::default())
-                .await,
+            session.begin(&fake, ScanStart::Attached).await,
             Err(Error::ScanModeMismatch {
                 current: ScanMode::Owned,
                 requested: ScanMode::Attached
@@ -618,7 +639,10 @@ mod tests {
     async fn test_start_scan_in_progress_maps_to_scan_in_progress() {
         let session = ScanSession::new();
         let result = session
-            .begin(&HostAlreadyScanning, ScanMode::Owned, ScanFilter::default())
+            .begin(
+                &HostAlreadyScanning,
+                ScanStart::Owned(ScanFilter::default()),
+            )
             .await;
         assert!(matches!(result, Err(Error::ScanInProgress)));
         // The session must not have been activated.
@@ -626,11 +650,7 @@ mod tests {
 
         // Attaching afterwards works, which is the intended fallback.
         assert!(session
-            .begin(
-                &HostAlreadyScanning,
-                ScanMode::Attached,
-                ScanFilter::default()
-            )
+            .begin(&HostAlreadyScanning, ScanStart::Attached)
             .await
             .unwrap());
         assert_eq!(session.mode(), Some(ScanMode::Attached));
@@ -677,7 +697,7 @@ mod tests {
     async fn test_failed_stop_scan_keeps_owned_session_active() {
         let session = ScanSession::new();
         session
-            .begin(&FailingStop, ScanMode::Owned, ScanFilter::default())
+            .begin(&FailingStop, ScanStart::Owned(ScanFilter::default()))
             .await
             .unwrap();
 
